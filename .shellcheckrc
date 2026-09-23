@@ -1,2 +1,2 @@
-# Profili e librerie sono caricati da percorsi calcolati a runtime.
+# Profiles and libraries are sourced from paths computed at runtime.
 disable=SC1090,SC1091

@@ -1,8 +1,8 @@
 {
   "name": "ccm-vscode",
   "displayName": "ccm — Claude Code Manager",
-  "description": "Mostra e cambia il profilo Claude Code (Team, personale, Vertex AI) di ogni workspace tramite la CLI ccm. Progetto non ufficiale.",
-  "version": "0.2.0",
+  "description": "See and switch the Claude Code profile (Team, personal, Vertex AI) of each workspace, powered by the ccm CLI. Unofficial.",
+  "version": "0.3.0",
   "publisher": "francescoboschi",
   "license": "MIT",
   "repository": {
@@ -39,22 +39,22 @@
       },
       {
         "command": "ccm.bind",
-        "title": "Associa profilo al workspace",
+        "title": "Bind Profile to Workspace",
         "category": "ccm"
       },
       {
         "command": "ccm.unbind",
-        "title": "Rimuovi associazione",
+        "title": "Remove Binding",
         "category": "ccm"
       },
       {
         "command": "ccm.openTerminal",
-        "title": "Apri terminale Claude con profilo…",
+        "title": "Open Claude Terminal with Profile…",
         "category": "ccm"
       },
       {
         "command": "ccm.list",
-        "title": "Mostra profili e progetti",
+        "title": "Show Profiles and Projects",
         "category": "ccm"
       },
       {
@@ -64,12 +64,12 @@
       },
       {
         "command": "ccm.configurePanel",
-        "title": "Configura pannello Claude Code",
+        "title": "Configure Claude Code Panel",
         "category": "ccm"
       },
       {
         "command": "ccm.refresh",
-        "title": "Aggiorna stato",
+        "title": "Refresh Status",
         "category": "ccm"
       }
     ],
@@ -79,17 +79,17 @@
         "ccm.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Percorso dell'eseguibile `ccm`. Vuoto = `~/.local/share/ccm/bin/ccm`, altrimenti `ccm` dal PATH."
+          "markdownDescription": "Path to the `ccm` executable. Empty = `~/.local/share/ccm/bin/ccm`, otherwise `ccm` from PATH."
         },
         "ccm.highlightPersonal": {
           "type": "boolean",
           "default": true,
-          "description": "Evidenzia la barra di stato quando il workspace usa un profilo personale."
+          "description": "Highlight the status bar when the workspace uses a personal profile."
         },
         "ccm.checkClaudeWrapper": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "All'avvio verifica che `claudeCode.claudeProcessWrapper` punti allo shim di ccm."
+          "markdownDescription": "On startup, check that `claudeCode.claudeProcessWrapper` points to the ccm shim."
         }
       }
     }

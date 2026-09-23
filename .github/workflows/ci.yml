@@ -13,14 +13,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Versione di bash usata dagli script
+      - name: bash version used by the scripts
         run: /bin/bash --version | head -n1
-      - name: Test CLI
+      - name: CLI tests
         run: /bin/bash tests/smoke.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Test estensione VS Code
+      - name: VS Code extension tests
         run: node vscode/test/run.js
 
   lint:
@@ -29,16 +29,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck
         run: shellcheck -s bash bin/ccm shims/claude lib/ccm-common.sh install.sh tests/smoke.sh
-      - name: Versioni allineate
+      - name: Versions in sync
         run: |
           cli=$(sed -n 's/^CCM_VERSION="\(.*\)"/\1/p' lib/ccm-common.sh)
           ext=$(node -p "require('./vscode/package.json').version")
-          echo "CLI $cli — estensione $ext"
+          echo "CLI $cli — extension $ext"
           test "$cli" = "$ext"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build estensione (verifica)
+      - name: Build extension (check)
         run: |
           cp LICENSE vscode/LICENSE
           cd vscode && npx --yes @vscode/vsce@latest package -o ../ccm-vscode.vsix

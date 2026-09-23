@@ -1,4 +1,4 @@
-// ccm per VS Code: interfaccia sottile sopra la CLI "ccm", che resta l'unica fonte di verità.
+// ccm for VS Code: a thin UI on top of the "ccm" CLI, which stays the single source of truth.
 'use strict';
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -29,7 +29,7 @@ function run(args, cwd) {
     cp.execFile(ccmPath(), args, { cwd: cwd || os.homedir(), env, timeout: 30000, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err && err.code === 'ENOENT') {
-          return reject(new Error('ccm non trovato: installalo oppure imposta "ccm.path" nei settings'));
+          return reject(new Error('ccm not found: install it, or set "ccm.path" in your settings'));
         }
         const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
         resolve({ code, stdout: String(stdout), stderr: String(stderr) });
@@ -39,17 +39,17 @@ function run(args, cwd) {
 
 async function runJson(args) {
   const r = await run(args);
-  if (r.code !== 0) throw new Error(r.stderr.trim() || `ccm ${args.join(' ')}: codice di uscita ${r.code}`);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `ccm ${args.join(' ')}: exit code ${r.code}`);
   return JSON.parse(r.stdout);
 }
 
 async function runOrThrow(args) {
   const r = await run(args);
-  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `ccm ${args.join(' ')} non riuscito`);
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `ccm ${args.join(' ')} failed`);
   return r.stdout.trim();
 }
 
-// ---------------------------------------------------------------- utilità
+// ---------------------------------------------------------------- helpers
 
 function fileFolders() {
   return (vscode.workspace.workspaceFolders || []).filter(f => f.uri.scheme === 'file');
@@ -61,20 +61,20 @@ function tilde(p) {
 }
 
 function describe(info) {
-  if (!info.profile) return 'nessun profilo';
-  if (!info.exists) return `${info.profile} (profilo inesistente)`;
+  if (!info.profile) return 'no profile';
+  if (!info.exists) return `${info.profile} (missing profile)`;
   return info.kind === 'vertex' ? `${info.profile} · vertex ${info.vertexProject || ''}`.trim() : `${info.profile} · ${info.kind}`;
 }
 
 async function pickFolder(placeHolder) {
   const folders = fileFolders();
   if (!folders.length) {
-    vscode.window.showErrorMessage('ccm: apri prima una cartella di progetto.');
+    vscode.window.showErrorMessage('ccm: open a project folder first.');
     return undefined;
   }
   if (folders.length === 1) return folders[0];
   const pick = await vscode.window.showQuickPick(
-    folders.map((f, i) => ({ label: f.name, description: tilde(f.uri.fsPath) + (i === 0 ? '  (decide il profilo del pannello)' : ''), folder: f })),
+    folders.map((f, i) => ({ label: f.name, description: tilde(f.uri.fsPath) + (i === 0 ? '  (decides the panel profile)' : ''), folder: f })),
     { placeHolder });
   return pick && pick.folder;
 }
@@ -87,7 +87,7 @@ async function pickProfile(placeHolder, current, allowNew) {
     detail: tilde(p.configDir),
     profile: p.name,
   }));
-  if (allowNew) items.push({ label: '$(add) Nuovo profilo…', description: 'apre un terminale con "ccm add"', create: true });
+  if (allowNew) items.push({ label: '$(add) New profile…', description: 'opens a terminal with "ccm add"', create: true });
   const pick = await vscode.window.showQuickPick(items, { placeHolder });
   if (pick && pick.create) {
     const t = vscode.window.createTerminal({ name: 'ccm add' });
@@ -103,7 +103,7 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(() => refresh().catch(() => {}), 300);
 }
 
-// ---------------------------------------------------------------- barra di stato
+// ---------------------------------------------------------------- status bar
 
 async function refresh() {
   const folders = fileFolders();
@@ -124,7 +124,7 @@ async function refresh() {
   const highlight = vscode.workspace.getConfiguration('ccm').get('highlightPersonal', true);
 
   if (!main.profile || !main.exists) {
-    status.text = `$(circle-slash) ccm: ${main.profile ? main.profile + '?' : 'nessun profilo'}`;
+    status.text = `$(circle-slash) ccm: ${main.profile ? main.profile + '?' : 'no profile'}`;
     status.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   } else {
     status.text = `$(account) ccm: ${main.profile}` + (main.kind === 'vertex' && main.vertexProject ? ` · ${main.vertexProject}` : '');
@@ -134,76 +134,76 @@ async function refresh() {
   if (mixed || main.conflictingSettings.length) status.text += ' $(warning)';
 
   const md = new vscode.MarkdownString(undefined, true);
-  md.appendMarkdown('**ccm — profilo Claude Code**\n\n');
+  md.appendMarkdown('**ccm — Claude Code profile**\n\n');
   for (const { folder, info } of infos) {
     md.appendMarkdown(`- **${folder.name}**: ${describe(info)}`);
-    if (info.source === 'bind' && info.boundPath !== info.dir) md.appendMarkdown(` _(da ${tilde(info.boundPath)})_`);
+    if (info.source === 'bind' && info.boundPath !== info.dir) md.appendMarkdown(` _(from ${tilde(info.boundPath)})_`);
     md.appendMarkdown('\n');
-    for (const w of info.conflictingSettings) md.appendMarkdown(`  - $(warning) ${tilde(w)} imposta variabili di account/provider\n`);
+    for (const w of info.conflictingSettings) md.appendMarkdown(`  - $(warning) ${tilde(w)} sets account/provider variables\n`);
   }
-  if (!main.profile) md.appendMarkdown('\nIl pannello e `claude` non partiranno qui finché non associ un profilo.\n');
-  if (mixed) md.appendMarkdown('\n$(warning) Cartelle con profili diversi: il pannello usa quello della **prima** cartella.\n');
-  md.appendMarkdown('\n_Clic per le azioni_');
+  if (!main.profile) md.appendMarkdown('\nThe panel and `claude` will not start here until you bind a profile.\n');
+  if (mixed) md.appendMarkdown('\n$(warning) Folders use different profiles: the panel uses the one of the **first** folder.\n');
+  md.appendMarkdown('\n_Click for actions_');
   status.tooltip = md;
   status.show();
 }
 
-// ---------------------------------------------------------------- comandi
+// ---------------------------------------------------------------- commands
 
 async function cmdBind() {
-  const folder = await pickFolder('Quale cartella vuoi associare?');
+  const folder = await pickFolder('Which folder do you want to bind?');
   if (!folder) return;
   const target = folder.uri.fsPath;
   const info = await runJson(['which', '--json', target]);
-  const profile = await pickProfile(`Profilo per ${folder.name}`, info.profile, true);
+  const profile = await pickProfile(`Profile for ${folder.name}`, info.profile, true);
   if (!profile) return;
 
   const parent = path.dirname(target);
   const scope = await vscode.window.showQuickPick([
-    { label: folder.name, description: tilde(target), detail: 'Solo questo progetto', path: target },
-    { label: path.basename(parent), description: tilde(parent), detail: 'Tutti i progetti in questa cartella, anche quelli futuri', path: parent },
-  ], { placeHolder: `Dove applicare "${profile}"?` });
+    { label: folder.name, description: tilde(target), detail: 'Only this project', path: target },
+    { label: path.basename(parent), description: tilde(parent), detail: 'Every project in this folder, including future ones', path: parent },
+  ], { placeHolder: `Where should "${profile}" apply?` });
   if (!scope) return;
 
   if (info.profile && info.exists && info.profile !== profile) {
     const ok = await vscode.window.showWarningMessage(
-      `Passi da "${info.profile}" a "${profile}". Le conversazioni già fatte restano nel profilo "${info.profile}" e non saranno visibili con "${profile}".`,
-      { modal: true }, 'Continua');
-    if (ok !== 'Continua') return;
+      `Switching from "${info.profile}" to "${profile}". Existing conversations stay in the "${info.profile}" profile and will not be visible from "${profile}".`,
+      { modal: true }, 'Continue');
+    if (ok !== 'Continue') return;
   }
   await runOrThrow(['bind', profile, scope.path]);
   await refresh();
   const choice = await vscode.window.showInformationMessage(
-    `ccm: ${tilde(scope.path)} → ${profile}. Le nuove sessioni Claude useranno questo profilo; quelle già aperte continuano con il precedente.`,
-    'Ricarica finestra');
+    `ccm: ${tilde(scope.path)} → ${profile}. New Claude sessions will use this profile; sessions already open keep the previous one.`,
+    'Reload Window');
   if (choice) vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
 async function cmdUnbind() {
-  const folder = await pickFolder('Da quale cartella vuoi rimuovere l\'associazione?');
+  const folder = await pickFolder('Which folder do you want to unbind?');
   if (!folder) return;
   const info = await runJson(['which', '--json', folder.uri.fsPath]);
   if (info.source !== 'bind') {
-    vscode.window.showInformationMessage(`ccm: ${folder.name} non ha associazioni.`);
+    vscode.window.showInformationMessage(`ccm: ${folder.name} has no binding.`);
     return;
   }
   let target = info.boundPath;
   if (info.boundPath !== info.dir) {
     const ok = await vscode.window.showWarningMessage(
-      `Il profilo "${info.profile}" è ereditato da ${tilde(info.boundPath)}. Rimuovere quell'associazione vale per tutti i progetti al suo interno.`,
-      { modal: true }, 'Rimuovi comunque');
-    if (ok !== 'Rimuovi comunque') return;
+      `The "${info.profile}" profile is inherited from ${tilde(info.boundPath)}. Removing that binding affects every project inside it.`,
+      { modal: true }, 'Remove Anyway');
+    if (ok !== 'Remove Anyway') return;
   }
   await runOrThrow(['unbind', target]);
   await refresh();
-  vscode.window.showInformationMessage(`ccm: associazione rimossa da ${tilde(target)}.`);
+  vscode.window.showInformationMessage(`ccm: binding removed from ${tilde(target)}.`);
 }
 
 async function cmdOpenTerminal() {
-  const folder = await pickFolder('In quale cartella aprire Claude?');
+  const folder = await pickFolder('Which folder should Claude open in?');
   if (!folder) return;
   const info = await runJson(['which', '--json', folder.uri.fsPath]);
-  const profile = await pickProfile('Con quale profilo?', info.profile, false);
+  const profile = await pickProfile('Which profile?', info.profile, false);
   if (!profile) return;
   const env = profile !== info.profile ? { CCM_OVERRIDE: profile } : undefined;
   const t = vscode.window.createTerminal({ name: `Claude · ${profile}`, cwd: folder.uri, env });
@@ -219,7 +219,7 @@ async function showInOutput(title, args) {
   output.append(r.stdout);
   if (r.stderr) output.append(r.stderr);
   output.appendLine('');
-  output.appendLine(`— ${title}: ${r.code === 0 ? 'ok' : 'da verificare (codice ' + r.code + ')'}`);
+  output.appendLine(`— ${title}: ${r.code === 0 ? 'ok' : 'needs attention (exit code ' + r.code + ')'}`);
 }
 
 async function checkPanelWrapper(interactive) {
@@ -227,32 +227,32 @@ async function checkPanelWrapper(interactive) {
   const conf = vscode.workspace.getConfiguration('claudeCode');
   const current = conf.get('claudeProcessWrapper');
   if (current === list.shim) {
-    if (interactive) vscode.window.showInformationMessage('ccm: il pannello Claude Code passa già da ccm.');
+    if (interactive) vscode.window.showInformationMessage('ccm: the Claude Code panel already goes through ccm.');
     return;
   }
   if (!interactive && ctx.globalState.get('ccm.skipWrapperCheck')) return;
   const msg = current
-    ? `ccm: il pannello Claude Code usa un altro wrapper (${current}) e non applica i profili ccm.`
-    : 'ccm: il pannello Claude Code non passa da ccm e userebbe l\'account di default.';
-  const buttons = interactive ? ['Configura'] : ['Configura', 'Non chiedere più'];
+    ? `ccm: the Claude Code panel uses another wrapper (${current}) and does not apply ccm profiles.`
+    : 'ccm: the Claude Code panel does not go through ccm and would use the default account.';
+  const buttons = interactive ? ['Configure'] : ['Configure', 'Don\'t Ask Again'];
   const choice = await vscode.window.showWarningMessage(msg, ...buttons);
-  if (choice === 'Configura') {
+  if (choice === 'Configure') {
     await conf.update('claudeProcessWrapper', list.shim, vscode.ConfigurationTarget.Global);
-    const r = await vscode.window.showInformationMessage('ccm: pannello configurato. Ricarica la finestra per applicarlo.', 'Ricarica finestra');
+    const r = await vscode.window.showInformationMessage('ccm: panel configured. Reload the window to apply it.', 'Reload Window');
     if (r) vscode.commands.executeCommand('workbench.action.reloadWindow');
-  } else if (choice === 'Non chiedere più') {
+  } else if (choice === 'Don\'t Ask Again') {
     await ctx.globalState.update('ccm.skipWrapperCheck', true);
   }
 }
 
 async function cmdMenu() {
   const pick = await vscode.window.showQuickPick([
-    { label: '$(link) Associa profilo al workspace', cmd: 'ccm.bind' },
-    { label: '$(debug-disconnect) Rimuovi associazione', cmd: 'ccm.unbind' },
-    { label: '$(terminal) Apri terminale Claude con profilo…', cmd: 'ccm.openTerminal' },
-    { label: '$(list-unordered) Mostra profili e progetti', cmd: 'ccm.list' },
+    { label: '$(link) Bind Profile to Workspace', cmd: 'ccm.bind' },
+    { label: '$(debug-disconnect) Remove Binding', cmd: 'ccm.unbind' },
+    { label: '$(terminal) Open Claude Terminal with Profile…', cmd: 'ccm.openTerminal' },
+    { label: '$(list-unordered) Show Profiles and Projects', cmd: 'ccm.list' },
     { label: '$(pulse) Doctor', cmd: 'ccm.doctor' },
-    { label: '$(gear) Configura pannello Claude Code', cmd: 'ccm.configurePanel' },
+    { label: '$(gear) Configure Claude Code Panel', cmd: 'ccm.configurePanel' },
   ], { placeHolder: 'ccm' });
   if (pick) vscode.commands.executeCommand(pick.cmd);
 }
@@ -263,14 +263,14 @@ function guarded(fn) {
   };
 }
 
-// ---------------------------------------------------------------- ciclo di vita
+// ---------------------------------------------------------------- lifecycle
 
 async function watchConfig() {
   try {
     const list = await runJson(['list', '--json']);
     if (watcher) watcher.close();
     watcher = fs.watch(list.home, () => scheduleRefresh());
-  } catch (_) { /* senza watcher si aggiorna comunque al focus della finestra */ }
+  } catch (_) { /* without a watcher we still refresh when the window gets focus */ }
 }
 
 function activate(context) {
@@ -278,14 +278,14 @@ function activate(context) {
   output = vscode.window.createOutputChannel('ccm');
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.command = 'ccm.menu';
-  status.name = 'ccm — profilo Claude Code';
+  status.name = 'ccm — Claude Code profile';
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, guarded(fn)));
   reg('ccm.menu', cmdMenu);
   reg('ccm.bind', cmdBind);
   reg('ccm.unbind', cmdUnbind);
   reg('ccm.openTerminal', cmdOpenTerminal);
-  reg('ccm.list', () => showInOutput('Profili e progetti', ['list']));
+  reg('ccm.list', () => showInOutput('Profiles and projects', ['list']));
   reg('ccm.doctor', () => showInOutput('Doctor', ['doctor']));
   reg('ccm.configurePanel', () => checkPanelWrapper(true));
   reg('ccm.refresh', refresh);

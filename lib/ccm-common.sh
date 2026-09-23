@@ -1,16 +1,16 @@
 # shellcheck shell=bash
-# ccm — libreria condivisa. Compatibile con bash 3.2 (macOS) e successivi.
+# ccm — shared library. Compatible with bash 3.2 (macOS) and later.
 
-# shellcheck disable=SC2034  # usata da bin/ccm
-CCM_VERSION="0.2.0"
+# shellcheck disable=SC2034  # used by bin/ccm
+CCM_VERSION="0.3.0"
 CCM_TAB="$(printf '\t')"
 CCM_HOME="${CCM_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/ccm}"
 CCM_PROFILES_DIR="$CCM_HOME/profiles"
 CCM_PROJECTS_FILE="$CCM_HOME/projects"
 CCM_ACCOUNTS_DIR="${CCM_ACCOUNTS_DIR:-$HOME/.claude-accounts}"
 
-# Variabili che possono cambiare account, provider o progetto di billing.
-# Vengono SEMPRE azzerate prima di applicare un profilo.
+# Variables that can change account, provider or billing project.
+# They are ALWAYS cleared before a profile is applied.
 CCM_MANAGED_VARS="CLAUDE_CONFIG_DIR ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
 CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_USE_VERTEX
 CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_FOUNDRY CLOUD_ML_REGION
@@ -26,10 +26,10 @@ ccm_valid_name() {
   return 0
 }
 
-# Percorso fisico di una directory (symlink risolti), vuoto se non esiste.
+# Physical path of a directory (symlinks resolved), empty if it does not exist.
 ccm_realdir() { (cd "$1" 2>/dev/null && pwd -P); }
 
-# /Users/x/foo -> ~/foo (solo per la visualizzazione)
+# /Users/x/foo -> ~/foo (display only)
 ccm_tilde() {
   case "$1" in
     "$HOME"|"$HOME"/*) printf '~%s\n' "${1#"$HOME"}" ;;
@@ -49,7 +49,7 @@ ccm_profile_names() {
   done
 }
 
-# Legge una variabile di un profilo senza toccare l'ambiente corrente.
+# Reads one variable of a profile without touching the current environment.
 ccm_profile_get() {
   (
     ccm_clean_env
@@ -66,14 +66,14 @@ ccm_clean_env() {
 ccm_load_profile() {
   local f
   f="$(ccm_profile_file "$1")"
-  [ -f "$f" ] || ccm_die "profilo '$1' inesistente (profili: $(ccm_profile_names | tr '\n' ' '))"
+  [ -f "$f" ] || ccm_die "profile '$1' does not exist (profiles: $(ccm_profile_names | tr '\n' ' '))"
   ccm_clean_env
   set -a; . "$f"; set +a
   export CCM_PROFILE="$1"
 }
 
-# Stampa "profilo<TAB>percorso" della regola con il prefisso più lungo che
-# contiene la directory $1 (percorso fisico). Nessun output se non c'è match.
+# Prints "profile<TAB>path" for the rule with the longest prefix that contains
+# directory $1 (physical path). No output when nothing matches.
 ccm_resolve() {
   local dir="$1" best="" bestp="" bestlen=0 p prof
   [ -f "$CCM_PROJECTS_FILE" ] || return 0
@@ -88,7 +88,7 @@ ccm_resolve() {
   return 0
 }
 
-# Directory "radice" di default per bind/unbind: root git, altrimenti cwd.
+# Default target for bind/unbind: git root, otherwise the current directory.
 ccm_default_target() {
   local t
   t="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -104,7 +104,7 @@ ccm_projects_remove() {
   mv "$tmp" "$CCM_PROJECTS_FILE"
 }
 
-# Trova il binario claude reale nel PATH, saltando lo shim di ccm.
+# Finds the real claude binary on PATH, skipping the ccm shim.
 ccm_real_claude() {
   local d shim="$CCM_ROOT/shims/claude"
   if [ -n "${CCM_REAL_CLAUDE:-}" ]; then

@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# ccm shim: sostituisce "claude" nel PATH, applica il profilo del progetto
-# corrente e poi esegue il claude reale con gli stessi argomenti.
+# ccm shim: replaces "claude" on PATH, applies the profile of the current
+# project and then runs the real claude with the same arguments.
 set -euo pipefail
 CCM_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 . "$CCM_ROOT/lib/ccm-common.sh"
 
-# Modalità wrapper (claudeCode.claudeProcessWrapper di VS Code): l'estensione
-# passa come primo argomento il proprio binario claude, da usare al posto di
-# quello nel PATH perché allineato alla versione del pannello.
+# Wrapper mode (VS Code claudeCode.claudeProcessWrapper): the extension passes
+# its own claude binary as the first argument. Use it instead of the one on
+# PATH, since it matches the panel's version.
 if [ $# -gt 0 ] && [ "${1##*/}" = claude ] && [ -f "$1" ] && [ -x "$1" ] && ! [ "$1" -ef "$0" ]; then
   real="$1"; shift
 else
-  real="$(ccm_real_claude)" || ccm_die "binario 'claude' reale non trovato nel PATH (installa Claude Code o imposta CCM_REAL_CLAUDE)"
+  real="$(ccm_real_claude)" || ccm_die "real 'claude' binary not found on PATH (install Claude Code or set CCM_REAL_CLAUDE)"
 fi
 
-# Via di fuga esplicita: nessuna gestione dei profili.
+# Explicit escape hatch: no profile handling at all.
 if [ "${CCM_BYPASS:-}" = 1 ]; then exec "$real" ${1+"$@"}; fi
 
-# Comandi che non dipendono dall'account.
+# Commands that do not depend on the account.
 case "${1:-}" in
   -v|--version|-h|--help|update) exec "$real" ${1+"$@"} ;;
 esac
@@ -32,10 +32,10 @@ fi
 
 if [ -z "$prof" ]; then
   {
-    echo "ccm: nessun profilo associato a $(ccm_tilde "$here")"
-    echo "     associa il progetto:   ccm bind <profilo>"
-    echo "     oppure una tantum:     ccm run <profilo> [argomenti]"
-    echo "     profili disponibili:   $(ccm_profile_names | tr '\n' ' ')"
+    echo "ccm: no profile bound to $(ccm_tilde "$here")"
+    echo "     bind this project:   ccm bind <profile>"
+    echo "     or just this once:   ccm run <profile> [args]"
+    echo "     available profiles:  $(ccm_profile_names | tr '\n' ' ')"
   } >&2
   exit 1
 fi

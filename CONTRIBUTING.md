@@ -1,26 +1,26 @@
-# Contribuire
+# Contributing
 
-Grazie! Qualche regola per mantenere ccm semplice e affidabile.
+Thanks! A few rules keep ccm simple and reliable.
 
-## Principi
-- **La CLI è l'unica fonte di verità.** L'estensione VS Code non contiene logica sui profili:
-  chiama `ccm ... --json`. Una nuova funzionalità nasce nella CLI.
-- **Fail-closed.** Nel dubbio `claude` non parte: meglio un errore chiaro che l'account sbagliato.
-- **Nessuna dipendenza** oltre a bash, awk, sed e (per Vertex) gcloud.
+## Principles
+- **The CLI is the single source of truth.** The VS Code extension holds no profile logic:
+  it calls `ccm ... --json`. New features start in the CLI.
+- **Fail-closed.** When in doubt, `claude` does not start: a clear error beats the wrong account.
+- **No dependencies** beyond bash, awk, sed and (for Vertex) gcloud.
 
-## Compatibilità shell
-Gli script devono girare con la **bash 3.2 di macOS**. Quindi niente array associativi,
-`mapfile`, `${var,,}`, `readarray`. Con `set -u` usa `${1+"$@"}` al posto di `"$@"`.
+## Shell compatibility
+Scripts must run on the **bash 3.2 that ships with macOS**. So: no associative arrays,
+`mapfile`, `readarray` or `${var,,}`. With `set -u`, use `${1+"$@"}` instead of `"$@"`.
 
-## Test
+## Tests
 ```bash
-bash tests/smoke.sh          # CLI e shim (HOME temporaneo, finto claude)
-node vscode/test/run.js      # estensione, con API vscode simulata e ccm reale
+bash tests/smoke.sh          # CLI and shim (temporary HOME, fake claude)
+node vscode/test/run.js      # extension, with a simulated vscode API and the real ccm
 shellcheck -s bash bin/ccm shims/claude lib/ccm-common.sh install.sh tests/smoke.sh
 ```
-La CI li esegue su Linux e macOS a ogni push e pull request.
+CI runs them on Linux and macOS on every push and pull request.
 
-## Rilasciare una versione
-1. Aggiorna `CCM_VERSION` in `lib/ccm-common.sh`, `version` in `vscode/package.json` e `CHANGELOG.md`.
-2. `git tag vX.Y.Z && git push --tags`: la GitHub Action crea la release con
-   `ccm.tar.gz` e `ccm-vscode.vsix`.
+## Cutting a release
+1. Update `CCM_VERSION` in `lib/ccm-common.sh`, `version` in `vscode/package.json` and `CHANGELOG.md`.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`: the GitHub Action publishes the release with
+   `ccm.tar.gz` and `ccm-vscode.vsix`.

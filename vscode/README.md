@@ -1,20 +1,19 @@
-# ccm per VS Code
+# ccm for VS Code
 
-Interfaccia per ccm (Claude Code Manager) dentro VS Code. Tutta la logica resta nella CLI `ccm`:
-l'estensione legge e scrive le stesse associazioni che usi da terminale.
+A VS Code UI for [claude-code-profiles](https://github.com/FrancescoBoschi/claude-code-profiles)
+(`ccm`). All the logic stays in the `ccm` CLI: the extension reads and writes the same
+bindings you use from the terminal. Unofficial, not affiliated with Anthropic.
 
-- **Barra di stato**: profilo del workspace (per Vertex anche il progetto GCP). Diventa rossa
-  se il workspace non è associato, gialla per i profili personali (disattivabile con
-  `ccm.highlightPersonal`). Il tooltip mostra il profilo di ogni cartella nei workspace multi-root.
-  Clic per il menu.
-- **ccm: Associa profilo al workspace**: scegli il profilo e se applicarlo al solo progetto
-  o alla cartella che lo contiene. Avvisa se cambi profilo a un progetto che ha già conversazioni.
-- **ccm: Rimuovi associazione**, **Apri terminale Claude con profilo…**, **Mostra profili e
-  progetti**, **Doctor**.
-- **ccm: Configura pannello Claude Code**: imposta `claudeCode.claudeProcessWrapper` sullo shim
-  di ccm, così anche il pannello ufficiale usa il profilo del workspace. All'avvio l'estensione
-  controlla questa impostazione e propone di sistemarla.
+- **Status bar**: the workspace profile (for Vertex, the GCP project too). Red when the
+  workspace is not bound, yellow for personal profiles (turn it off with
+  `ccm.highlightPersonal`). In multi-root workspaces the tooltip shows every folder. Click it for the menu.
+- **ccm: Bind Profile to Workspace**: pick the profile, then whether it applies to this
+  project only or to its whole parent folder. Warns you when a project that already has
+  conversations moves to another profile.
+- **ccm: Remove Binding**, **Open Claude Terminal with Profile…**, **Show Profiles and
+  Projects**, **Doctor**.
+- **ccm: Configure Claude Code Panel**: sets `claudeCode.claudeProcessWrapper` to the ccm
+  shim, so the official panel uses the workspace profile too. The extension checks this
+  setting on startup and offers to fix it.
 
-Richiede ccm 0.2.0 o successivo (serve `--json`).
-
-Installazione: `code --install-extension ccm-vscode.vsix`
+Requires ccm 0.3.0 or later. Install: `code --install-extension ccm-vscode.vsix`

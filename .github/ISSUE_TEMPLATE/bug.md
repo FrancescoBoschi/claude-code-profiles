@@ -1,17 +1,17 @@
 ---
-name: Segnalazione bug
-about: Qualcosa non funziona
+name: Bug report
+about: Something does not work
 ---
 
-**Cosa succede**
+**What happens**
 
-**Cosa ti aspettavi**
+**What you expected**
 
-**Output di `ccm doctor`** (togli nomi di progetti o account se non vuoi mostrarli)
+**Output of `ccm doctor`** (remove project or account names if you prefer not to share them)
 ```
 ```
 
-**Ambiente**
-- Sistema operativo e shell:
+**Environment**
+- OS and shell:
 - `claude --version`:
-- Terminale o pannello VS Code (versione estensione Claude Code):
+- Terminal or VS Code panel (Claude Code extension version):

@@ -1,329 +1,349 @@
-# ccm — Claude Code Manager
+<p align="center">
+  <img src="docs/banner.svg" alt="claude-code-profiles: one Claude Code account per project" width="100%">
+</p>
+
+# claude-code-profiles
 
 [![CI](https://github.com/FrancescoBoschi/claude-code-profiles/actions/workflows/ci.yml/badge.svg)](https://github.com/FrancescoBoschi/claude-code-profiles/actions/workflows/ci.yml)
-[![Licenza: MIT](https://img.shields.io/badge/licenza-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/FrancescoBoschi/claude-code-profiles)](https://github.com/FrancescoBoschi/claude-code-profiles/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Un account Claude Code per ogni progetto, applicato in automatico.**
+**One Claude Code account per project, applied automatically.**
 
-Se usi Claude Code con più account (un piano Team aziendale, un account personale, la
-fatturazione su Google Vertex AI) ccm ti permette di associare ogni progetto al suo account
-una volta sola. Da lì lanci `claude` come sempre, da terminale o dal pannello di VS Code, e
-parte con l'account giusto: niente logout, niente variabili da ricordare, nessun rischio di
-fatturare sul progetto sbagliato.
+If you use Claude Code with more than one account (a company Team plan, one or more
+personal accounts, billing through Google Vertex AI) `ccm` lets you bind each project to
+its account once. From then on you just run `claude` as usual, in the terminal or in the
+VS Code panel, and it starts with the right account. No logging out, no environment
+variables to remember, no risk of billing the wrong project.
 
 ```text
-~/work/cliente-a   →  team      (piano Team aziendale)
-~/work/piattaforma →  vertex    (billing sul progetto GCP)
-~/personal         →  mio       (account personale)
+~/work/client-app   →  work       (company Team plan)
+~/work/platform     →  gcp-prod   (billed to a GCP project via Vertex AI)
+~/personal          →  personal   (your own subscription)
+~/side-projects     →  side       (a second personal account)
 ```
 
-> **Progetto non ufficiale**, non affiliato ad Anthropic. Claude e Claude Code sono marchi
-> di Anthropic. ccm si appoggia a meccanismi di Claude Code che funzionano ma non sono tutti
-> documentati ufficialmente (vedi [Limiti noti](#limiti-noti)).
+> **Unofficial project**, not affiliated with Anthropic. Claude and Claude Code are
+> trademarks of Anthropic. ccm relies on Claude Code mechanisms that work but are not all
+> officially documented (see [Known limitations](#known-limitations)).
 
-## Indice
+## Why ccm
 
-- [Requisiti](#requisiti)
-- [Installazione](#installazione)
-- [Configurazione in 5 minuti](#configurazione-in-5-minuti)
+- **Set it once per project.** Bindings live outside your repositories, so nothing ends up in shared commits.
+- **As many profiles as you need**, with any name you like: two personal accounts, several GCP projects, a client's Team plan.
+- **Fail-closed.** In a folder with no profile, `claude` refuses to start instead of silently using the wrong account.
+- **Terminal and VS Code.** The official Claude Code panel uses the same profiles, and a status bar shows which one is active.
+- **Private by design.** No telemetry, no network calls at runtime, no dependencies beyond bash. Credentials never leave your machine and stay where Claude Code and gcloud already keep them.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Setup in 5 minutes](#setup-in-5-minutes)
 - [VS Code](#vs-code)
-- [Uso quotidiano](#uso-quotidiano)
-- [Comandi](#comandi)
-- [Come funziona](#come-funziona)
-- [Conversazioni esistenti](#conversazioni-esistenti)
-- [Risoluzione dei problemi](#risoluzione-dei-problemi)
-- [Limiti noti](#limiti-noti)
-- [Aggiornare e disinstallare](#aggiornare-e-disinstallare)
-- [Sviluppo](#sviluppo)
+- [Everyday use](#everyday-use)
+- [Commands](#commands)
+- [How it works](#how-it-works)
+- [Existing conversations](#existing-conversations)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [Updating and uninstalling](#updating-and-uninstalling)
+- [Development](#development)
 
-## Requisiti
+## Requirements
 
-- **macOS o Linux** (su Windows: dentro WSL). Funziona con zsh e bash, compresa la bash 3.2 di macOS.
-- **Claude Code** già installato (`claude --version`).
-- Per i profili Vertex AI: **Google Cloud SDK** (`gcloud`) e un progetto GCP con i modelli
-  Claude abilitati in Vertex AI.
-- Per l'estensione: **VS Code** con l'estensione ufficiale Claude Code.
+- **macOS or Linux** (on Windows: inside WSL). Works with zsh and bash, including the bash 3.2 that ships with macOS.
+- **Claude Code** already installed (`claude --version`).
+- For Vertex AI profiles: the **Google Cloud SDK** (`gcloud`) and a GCP project with Claude models enabled in Vertex AI.
+- For the extension: **VS Code** with the official Claude Code extension.
 
-## Installazione
+## Installation
 
-### Opzione A — un comando
+### Option A: one command
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FrancescoBoschi/claude-code-profiles/main/install.sh | bash -s -- --with-vscode
 ```
 
-Installa la CLI e, se trova il comando `code`, anche l'estensione VS Code.
-Senza `--with-vscode` installa solo la CLI.
+Installs the CLI and, if the `code` command is available, the VS Code extension too.
+Without `--with-vscode` only the CLI is installed.
 
-### Opzione B — dalla pagina Releases
+### Option B: from the Releases page
 
-1. Scarica `ccm.tar.gz` dall'[ultima release](https://github.com/FrancescoBoschi/claude-code-profiles/releases/latest).
-2. Nel terminale:
+1. Download `ccm.tar.gz` from the [latest release](https://github.com/FrancescoBoschi/claude-code-profiles/releases/latest).
+2. In a terminal:
    ```bash
    tar xzf ccm.tar.gz && cd ccm
    ./install.sh --with-vscode
    ```
 
-### Opzione C — dal sorgente
+### Option C: from source
 
 ```bash
-git clone https://github.com/FrancescoBoschi/claude-code-profiles.git && cd ccm
+git clone https://github.com/FrancescoBoschi/claude-code-profiles.git && cd claude-code-profiles
 ./install.sh
 ```
 
-### Cosa fa l'installer
+### What the installer does
 
-- copia i file in `~/.local/share/ccm`;
-- crea `~/.config/ccm/` (profili e associazioni);
-- aggiunge in fondo a `~/.zshrc` / `~/.bashrc` un blocco delimitato da `# >>> ccm >>>`
-  che mette lo shim di ccm in testa al PATH.
+- copies the files to `~/.local/share/ccm`;
+- creates `~/.config/ccm/` (profiles and bindings);
+- appends a block marked `# >>> ccm >>>` to the end of `~/.zshrc` / `~/.bashrc`, which puts the ccm shim first on your PATH.
 
-Poi **apri un nuovo terminale** e controlla:
+Then **open a new terminal** and check:
 
 ```bash
 ccm doctor
 ```
 
-La prima riga deve dire `✓ lo shim ccm è il primo 'claude' nel PATH`.
+The first line should read `✓ the ccm shim is the first 'claude' on PATH`.
 
-## Configurazione in 5 minuti
+## Setup in 5 minutes
 
-### 1. Crea un profilo per ogni account
+### 1. Create one profile per account
 
-Lo fai **una volta sola**, da qualunque cartella.
+You do this **once**, from any folder. The name is up to you; `--type` only tells ccm how
+the account authenticates and how to display it. Create as many profiles as you need.
 
 ```bash
-ccm add team --type team            # account aziendale con piano Team
-ccm add mio  --type personal        # account personale
-ccm add vertex --type vertex --project ID-PROGETTO-GCP --region global
+ccm add work     --type team        # company account on a Team plan
+ccm add personal --type personal    # your personal subscription
+ccm add side     --type personal    # a second personal account
+ccm add gcp-prod --type vertex --project MY-GCP-PROJECT --region global
 ```
 
-Il nome del profilo lo scegli tu. Senza opzioni, `ccm add <nome>` chiede i dati in modo interattivo.
-Per Vertex puoi aggiungere `--gcloud-config NOME` per usare una configurazione gcloud specifica.
+Run `ccm add <name>` without options to be asked interactively. For Vertex you can add
+`--gcloud-config NAME` to use a specific gcloud configuration.
 
-### 2. Fai il primo login di ogni profilo
+### 2. Log in once per profile
 
 ```bash
-ccm login team      # si apre Claude Code: completa il login (se non compare, digita /login), poi /exit
-ccm login mio
-ccm login vertex    # per Vertex esegue: gcloud auth application-default login
+ccm login work       # Claude Code opens: log in (type /login if the screen does not appear), then /exit
+ccm login personal
+ccm login side
+ccm login gcp-prod   # for Vertex this runs: gcloud auth application-default login
 ```
 
-Ogni profilo tiene le sue credenziali: dopo il primo login non dovrai più rifarlo.
+Each profile keeps its own credentials, so you never have to log in again.
 
-### 3. Associa i progetti
+### 3. Bind your projects
 
-Lo fai **una volta per progetto**, dalla cartella del progetto:
+Do this **once per project**, from the project folder:
 
 ```bash
-cd ~/work/cliente-a && ccm bind team
-cd ~/work/piattaforma && ccm bind vertex
+cd ~/work/client-app && ccm bind work
+cd ~/work/platform   && ccm bind gcp-prod
 ```
 
-`bind` associa la root del repository git, quindi va bene lanciarlo anche da una sottocartella.
+`bind` uses the root of the git repository, so running it from a subfolder is fine.
 
-**Scorciatoia:** associa le cartelle che raccolgono più progetti. Vince sempre l'associazione
-più specifica, quindi puoi fare eccezioni sui singoli progetti:
+**Shortcut:** bind the folders that contain your projects. The most specific binding
+always wins, so you can still make exceptions for single projects:
 
 ```bash
-ccm bind team ~/work          # tutti i progetti in ~/work, anche quelli futuri
-ccm bind mio  ~/personal
-ccm bind vertex ~/work/piattaforma   # eccezione: questo va su Vertex
+ccm bind work ~/work                 # every project in ~/work, including future ones
+ccm bind personal ~/personal
+ccm bind gcp-prod ~/work/platform    # exception: this one is billed to Vertex
 ```
 
-### 4. Verifica
+### 4. Check
 
 ```bash
-cd ~/work/cliente-a
-ccm which         # mostra il profilo che verrà usato qui
-claude            # la statusline in basso mostra "ccm: team"; /status mostra l'account
+cd ~/work/client-app
+ccm which        # shows which profile will be used here, and why
+claude           # the statusline shows "ccm: work"; /status shows the account
 ```
 
 ## VS Code
 
-L'estensione ufficiale di Claude Code avvia il **proprio** binario `claude`, senza passare dal
-PATH: senza configurazione il pannello userebbe l'account di default e ignorerebbe ccm.
-La soluzione è l'impostazione `claudeCode.claudeProcessWrapper`, che ccm sa gestire.
+The official Claude Code extension starts its **own** `claude` binary without going
+through your PATH: without configuration the panel would use the default account and
+ignore ccm. The fix is the `claudeCode.claudeProcessWrapper` setting, which ccm supports.
 
-### Con l'estensione ccm (consigliato)
+### With the ccm extension (recommended)
 
-1. Installala con `./install.sh --with-vscode`, oppure scarica `ccm-vscode.vsix` dalla
-   [pagina Releases](https://github.com/FrancescoBoschi/claude-code-profiles/releases/latest) e in VS Code vai su
-   **Estensioni → `…` → Install from VSIX…**.
-2. Ricarica VS Code. Al primo avvio ti propone di configurare il pannello di Claude Code:
-   scegli **Configura**, poi **Ricarica finestra**.
+1. Install it with `./install.sh --with-vscode`, or download `ccm-vscode.vsix` from the
+   [Releases page](https://github.com/FrancescoBoschi/claude-code-profiles/releases/latest) and in VS Code choose
+   **Extensions → `…` → Install from VSIX…**.
+2. Reload VS Code. On first start it offers to configure the Claude Code panel:
+   choose **Configure**, then **Reload Window**.
 
-Cosa ottieni:
+What you get:
 
-- **Barra di stato** (in basso a sinistra): il profilo del workspace, per esempio
-  `ccm: team` o `ccm: vertex · progetto`. È **rossa** se il workspace non è associato,
-  **gialla** per i profili personali. Il tooltip mostra il dettaglio di ogni cartella. Clic per il menu.
-- **Command palette** (`Cmd/Ctrl+Shift+P` → "ccm"):
-  - *Associa profilo al workspace* — anche all'intera cartella contenitore;
-  - *Rimuovi associazione*;
-  - *Apri terminale Claude con profilo…* — un profilo diverso, una tantum;
-  - *Mostra profili e progetti*, *Doctor*;
-  - *Configura pannello Claude Code*.
+- **Status bar** (bottom left): the workspace profile, for example `ccm: work` or
+  `ccm: gcp-prod · my-project`. It turns **red** when the workspace is not bound and
+  **yellow** for personal profiles. The tooltip shows every folder of the workspace. Click it for the menu.
+- **Command Palette** (`Cmd/Ctrl+Shift+P` → "ccm"):
+  - *Bind Profile to Workspace*, to the project or to its whole parent folder;
+  - *Remove Binding*;
+  - *Open Claude Terminal with Profile…*, for a one-off different profile;
+  - *Show Profiles and Projects*, *Doctor*;
+  - *Configure Claude Code Panel*.
 
-Impostazioni: `ccm.path` (percorso di ccm, se non è quello standard), `ccm.highlightPersonal`,
+Settings: `ccm.path` (path to ccm, if not the default one), `ccm.highlightPersonal`,
 `ccm.checkClaudeWrapper`.
 
-### Senza l'estensione ccm
+### Without the ccm extension
 
-Nei settings **utente** di VS Code (`Preferences: Open User Settings (JSON)`) aggiungi,
-sostituendo il tuo nome utente:
+In your **user** settings (`Preferences: Open User Settings (JSON)`) add, with your own
+macOS/Linux user name:
 
 ```json
-"claudeCode.claudeProcessWrapper": "/Users/TUO-NOME-UTENTE/.local/share/ccm/shims/claude"
+"claudeCode.claudeProcessWrapper": "/Users/YOUR-USER-NAME/.local/share/ccm/shims/claude"
 ```
 
-poi `Developer: Reload Window`.
+then run `Developer: Reload Window`.
 
-## Uso quotidiano
+## Everyday use
 
-Non devi fare nulla: apri il progetto e usa `claude` o il pannello. `--continue` e `--resume`
-ritrovano sempre le conversazioni del progetto, perché il progetto usa sempre lo stesso profilo.
+There is nothing to do: open the project and use `claude` or the panel. `--continue` and
+`--resume` always find the project's conversations, because the project always uses the
+same profile.
 
-- **Progetto nuovo?** Se `claude` risponde `nessun profilo associato`, fai `ccm bind <profilo>`
-  (o usa la barra di stato di VS Code). È voluto: meglio un errore che l'account sbagliato.
-- **Una volta sola con un altro account?** `ccm run <profilo>` (accetta gli stessi argomenti di `claude`).
-- **Cambiare account a un progetto?** `ccm bind <altro-profilo>`. Vale per le sessioni nuove:
-  quelle già aperte continuano con il profilo precedente.
+- **New project?** If `claude` says `no profile bound to …`, run `ccm bind <profile>`
+  (or use the VS Code status bar). This is on purpose: an error is better than the wrong account.
+- **Another account, just once?** `ccm run <profile>` (accepts the same arguments as `claude`).
+- **Move a project to another account?** `ccm bind <other-profile>`. It applies to new
+  sessions; sessions already open keep the previous profile.
+- **Which profile am I on?** `ccm current` prints just the name, handy in a shell prompt.
 
-## Comandi
+## Commands
 
-| Comando | Cosa fa |
+| Command | What it does |
 |---|---|
-| `ccm add <nome> [--type team\|personal\|vertex] [--project ID] [--region R] [--gcloud-config N]` | crea un profilo con la sua config dir isolata |
-| `ccm login <nome>` | primo login OAuth, o refresh delle credenziali gcloud per Vertex |
-| `ccm bind <profilo> [dir]` | associa un progetto (default: root git, altrimenti cartella corrente) |
-| `ccm unbind [dir]` | rimuove l'associazione |
-| `ccm which [dir] [--json]` | profilo che verrebbe usato, e avvisi su settings del repo in conflitto |
-| `ccm list [--json]` | profili e progetti associati |
-| `ccm run <profilo> [argomenti]` | lancia claude con un profilo forzato |
-| `ccm doctor` | verifica PATH, login, credenziali, associazioni orfane |
-| `ccm edit <nome>` / `ccm remove <nome>` | modifica / elimina un profilo |
+| `ccm add <name> [--type team\|personal\|vertex] [--project ID] [--region R] [--gcloud-config N]` | create a profile with its own isolated config dir |
+| `ccm login <name>` | first OAuth login, or refresh gcloud credentials for Vertex |
+| `ccm rename <old> <new>` | rename a profile and update its bindings (logins are kept) |
+| `ccm bind <profile> [dir]` | bind a project (default: git root, otherwise the current folder) |
+| `ccm unbind [dir]` | remove the binding |
+| `ccm which [dir] [--json]` | the profile that would be used, and warnings about conflicting repo settings |
+| `ccm current [dir]` | just the profile name (exit code 1 if none) |
+| `ccm list [--json]` | profiles and bound projects |
+| `ccm run <profile> [args]` | run claude with a forced profile |
+| `ccm doctor` | check PATH, logins, credentials and orphaned bindings |
+| `ccm edit <name>` / `ccm remove <name>` | edit / delete a profile |
 
-Variabili utili: `CCM_OVERRIDE=<profilo>` forza un profilo, `CCM_BYPASS=1` salta ccm,
-`CCM_REAL_CLAUDE=/percorso/claude` indica il binario reale se non è nel PATH.
+Useful variables: `CCM_OVERRIDE=<profile>` forces a profile, `CCM_BYPASS=1` skips ccm,
+`CCM_REAL_CLAUDE=/path/to/claude` points to the real binary if it is not on PATH.
 
-## Come funziona
+## How it works
 
-- **Profili.** Ogni profilo è un file `~/.config/ccm/profiles/<nome>.env` (permessi 600) più
-  una config dir in `~/.claude-accounts/<nome>`, passata a Claude Code tramite
-  `CLAUDE_CONFIG_DIR`. Credenziali, impostazioni e conversazioni restano separate per account.
-- **Associazioni.** Stanno in `~/.config/ccm/projects`, fuori dai repository: nessun nome di
-  profilo finisce nei commit condivisi. Vince la regola con il percorso più lungo, e i percorsi
-  sono risolti al percorso fisico (symlink compresi).
-- **Shim.** `~/.local/share/ccm/shims/claude` viene prima del `claude` reale nel PATH. A ogni
-  avvio trova il profilo della cartella corrente, **azzera** le variabili che potrebbero
-  cambiare account, provider o progetto di billing (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`, `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT`,
-  `GOOGLE_APPLICATION_CREDENTIALS`…), applica il profilo e avvia il binario reale.
-- **Pannello VS Code.** Con `claudeProcessWrapper`, l'estensione Claude Code chiama lo shim
-  passandogli il proprio binario: lo shim applica il profilo e usa quel binario, così la
-  versione resta allineata al pannello.
-- **Fail-closed.** In una cartella non associata `claude` non parte. `--version`, `--help` e
-  `update` funzionano ovunque.
+- **Profiles.** Each profile is a file `~/.config/ccm/profiles/<name>.env` (mode 600)
+  plus a config dir `~/.claude-accounts/<name>`, passed to Claude Code through
+  `CLAUDE_CONFIG_DIR`. Credentials, settings and conversations stay separate per account.
+- **Bindings.** They live in `~/.config/ccm/projects`, outside your repositories. The rule
+  with the longest path wins, and paths are resolved to their physical location (symlinks included).
+- **Shim.** `~/.local/share/ccm/shims/claude` comes before the real `claude` on PATH. On
+  every start it finds the profile for the current folder, **clears** every variable that
+  could change the account, provider or billing project (`ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
+  `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`…), applies
+  the profile and starts the real binary.
+- **VS Code panel.** With `claudeProcessWrapper`, the Claude Code extension calls the shim
+  and passes its own binary: the shim applies the profile and runs that binary, so the
+  version always matches the panel.
+- **Fail-closed.** In an unbound folder `claude` does not start. `--version`, `--help` and
+  `update` work everywhere.
 
-## Conversazioni esistenti
+## Existing conversations
 
-Le conversazioni fatte **prima** di ccm stanno in `~/.claude/projects/` e ccm non le tocca.
-Con un profilo nuovo però non le vedrai, perché ogni profilo ha la sua cartella. Due possibilità:
+Conversations from **before** ccm live in `~/.claude/projects/` and ccm does not touch
+them. A new profile will not see them, though, because each profile has its own folder.
+Two options:
 
-**Riusa `~/.claude` per un profilo.** Per il profilo dell'account con cui sei già loggato,
-esegui `ccm edit <nome>` e imposta `CLAUDE_CONFIG_DIR=/Users/TUO-NOME-UTENTE/.claude`. Quel
-profilo ritrova tutto com'era (e non serve rifare il login). Vale per un solo profilo.
+**Reuse `~/.claude` for one profile.** For the account you are already logged in with,
+run `ccm edit <name>` and set `CLAUDE_CONFIG_DIR=/Users/YOUR-USER-NAME/.claude`. That
+profile finds everything as it was (no new login needed). This works for one profile only.
 
-**Copia le conversazioni di un progetto** nel profilo nuovo, a sessioni chiuse:
+**Copy a project's conversations** into the new profile, with its sessions closed:
 
 ```bash
-cd ~/work/piattaforma
+cd ~/work/platform
 enc=$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')
-ls -d ~/.claude/projects/"$enc"            # verifica che esista con questo nome
-mkdir -p ~/.claude-accounts/vertex/projects
-cp -R ~/.claude/projects/"$enc" ~/.claude-accounts/vertex/projects/
+ls -d ~/.claude/projects/"$enc"            # check that it exists under this name
+mkdir -p ~/.claude-accounts/gcp-prod/projects
+cp -R ~/.claude/projects/"$enc" ~/.claude-accounts/gcp-prod/projects/
 ```
 
-Alcune impostazioni per progetto (fiducia nella cartella, permessi accordati, server MCP
-aggiunti con `claude mcp add` in scope locale) vanno ricreate nel profilo nuovo. Gli MCP
-definiti nel `.mcp.json` del repository funzionano subito.
+Some per-project settings (folder trust, granted permissions, MCP servers added with
+`claude mcp add` in local scope) have to be set up again in the new profile. MCP servers
+defined in the repository's `.mcp.json` work right away.
 
-## Risoluzione dei problemi
+## Troubleshooting
 
-**`ccm: comando non trovato` o `doctor` dice che lo shim non è il primo `claude`.**
-Apri un nuovo terminale. Se persiste, il blocco `# >>> ccm >>>` deve essere l'**ultima** cosa
-del tuo `~/.zshrc` / `~/.bashrc`: se lo segue qualcosa che modifica il PATH (per esempio
-l'installer di Claude Code che aggiunge `~/.local/bin`), sposta il blocco in fondo.
+**`ccm: command not found`, or `doctor` says the shim is not the first `claude`.**
+Open a new terminal. If it persists, the `# >>> ccm >>>` block must be the **last** thing
+in your `~/.zshrc` / `~/.bashrc`: if something after it changes PATH (for example the
+Claude Code installer adding `~/.local/bin`), move the block to the end.
 
-**`nessun profilo associato a …`.** È il fail-closed: `ccm bind <profilo>` in quella cartella.
-Attenzione ai *git worktree* creati fuori dalle cartelle associate: vanno associati a parte.
+**`no profile bound to …`.** That is fail-closed at work: run `ccm bind <profile>` in that folder.
+Watch out for *git worktrees* created outside your bound folders: bind them separately.
 
-**`doctor` segnala variabili come `CLAUDE_CODE_USE_VERTEX` impostate nella shell.**
-Sono residui di una configurazione precedente, di solito in `~/.zshrc`. Lo shim le ignora, ma
-toglile: altrimenti tutto ciò che non passa da ccm (script, `CCM_BYPASS=1`) le userebbe.
+**`doctor` reports variables such as `CLAUDE_CODE_USE_VERTEX` set in your shell.**
+They are leftovers from an older setup, usually in `~/.zshrc`. The shim ignores them, but
+remove them: anything that does not go through ccm (scripts, `CCM_BYPASS=1`) would use them.
 
-**`? login non rilevato` su macOS.** Su macOS le credenziali stanno nel Portachiavi e ccm non
-le vede: verifica con `/status` dentro Claude Code.
+**`? login not detected` on macOS.** On macOS credentials live in the Keychain, where ccm
+cannot see them: check with `/status` inside Claude Code.
 
-**Il pannello VS Code non risponde in un progetto.** Se la barra di stato è rossa il progetto
-non è associato. Altrimenti esegui *ccm: Doctor* e controlla che `claudeCode.claudeProcessWrapper`
-punti allo shim (*ccm: Configura pannello Claude Code*).
+**The VS Code panel does not respond in a project.** If the status bar is red, the project
+is not bound. Otherwise run *ccm: Doctor* and check that `claudeCode.claudeProcessWrapper`
+points to the shim (*ccm: Configure Claude Code Panel*).
 
-**Vertex fattura sul progetto sbagliato.** `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT` e il file
-in `GOOGLE_APPLICATION_CREDENTIALS` hanno priorità su `ANTHROPIC_VERTEX_PROJECT_ID`. Lo shim li
-azzera; se ti servono, impostali esplicitamente nel file del profilo (`ccm edit vertex`).
-Anche `.claude/settings.json` del repository può definire variabili: `ccm which` lo segnala.
+**Vertex bills the wrong project.** `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT` and the file in
+`GOOGLE_APPLICATION_CREDENTIALS` take precedence over `ANTHROPIC_VERTEX_PROJECT_ID`. The
+shim clears them; if you need them, set them explicitly in the profile file (`ccm edit gcp-prod`).
+A repository's `.claude/settings.json` can define variables too: `ccm which` flags it.
 
-**Più profili Vertex con identità GCP diverse.** Le credenziali ADC di gcloud sono per utente.
-Imposta nel file di ciascun profilo un `CLOUDSDK_CONFIG` dedicato oppure un
-`GOOGLE_APPLICATION_CREDENTIALS` con un service account.
+**Several Vertex profiles with different GCP identities.** gcloud ADC credentials are per
+user. Set a dedicated `CLOUDSDK_CONFIG`, or a `GOOGLE_APPLICATION_CREDENTIALS` service
+account, in each profile file.
 
-## Limiti noti
+## Known limitations
 
-- `CLAUDE_CONFIG_DIR` è molto usata ma non documentata ufficialmente. Dopo ogni aggiornamento
-  di Claude Code esegui `ccm doctor` e verifica `/status`.
-- Il modo in cui il pannello VS Code chiama `claudeProcessWrapper` (primo argomento = binario
-  dell'estensione) è stato osservato, non documentato. Se cambia, lo shim ricade sul binario nel PATH.
-- Con `CLAUDE_CONFIG_DIR` impostata alcune versioni di Claude Code leggono comunque anche
-  `~/.claude/CLAUDE.md`: tieni lì solo istruzioni valide per tutti gli account.
-- Il cambio di profilo vale per le sessioni nuove, non per quelle già aperte.
-- Nei workspace multi-root il pannello usa il profilo della **prima** cartella.
-- L'estensione ccm gestisce solo workspace locali (non SSH, container o WSL remoto).
+- `CLAUDE_CONFIG_DIR` is widely used but not officially documented. After every Claude Code
+  update, run `ccm doctor` and check `/status`.
+- The way the VS Code panel calls `claudeProcessWrapper` (first argument = the extension's
+  binary) was observed, not documented. If it changes, the shim falls back to the binary on PATH.
+- With `CLAUDE_CONFIG_DIR` set, some Claude Code versions still read `~/.claude/CLAUDE.md`
+  as well: keep only instructions that apply to every account there.
+- Switching profile applies to new sessions, not to sessions already open.
+- In multi-root workspaces the panel uses the profile of the **first** folder.
+- The ccm extension only handles local workspaces (not SSH, containers or remote WSL).
 
-## Aggiornare e disinstallare
+## Updating and uninstalling
 
-**Aggiornare:** rilancia il comando di installazione (Opzione A) o `./install.sh` da una
-versione nuova. Profili, associazioni e credenziali restano.
+**Update:** run the installation command again (Option A), or `./install.sh` from a newer
+version. Profiles, bindings and credentials are kept.
 
-**Disinstallare:**
+**Uninstall:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FrancescoBoschi/claude-code-profiles/main/install.sh | bash -s -- --uninstall
 ```
 
-Rimuove programma, blocco nei file rc ed estensione VS Code. Profili (`~/.config/ccm`) e
-credenziali (`~/.claude-accounts`) restano: cancellali a mano se non servono più. Ricordati di
-togliere `claudeCode.claudeProcessWrapper` dai settings di VS Code.
+This removes the program, the rc block and the VS Code extension. Profiles
+(`~/.config/ccm`) and credentials (`~/.claude-accounts`) are kept: delete them by hand if
+you no longer need them. Remember to remove `claudeCode.claudeProcessWrapper` from your
+VS Code settings.
 
-## Sviluppo
+## Development
 
 ```text
 bin/ccm              CLI
-shims/claude         shim che sostituisce claude nel PATH
-lib/ccm-common.sh    funzioni condivise
-install.sh           installer / disinstaller
-tests/smoke.sh       test della CLI
-vscode/              estensione VS Code (JavaScript puro, nessun build step)
+shims/claude         shim that replaces claude on PATH
+lib/ccm-common.sh    shared functions
+install.sh           installer / uninstaller
+tests/smoke.sh       CLI tests
+vscode/              VS Code extension (plain JavaScript, no build step)
 ```
 
 ```bash
 bash tests/smoke.sh && node vscode/test/run.js
 ```
 
-Leggi [CONTRIBUTING.md](CONTRIBUTING.md) per le regole di compatibilità e per rilasciare una
-versione.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for compatibility rules and how to cut a release.
 
-## Licenza
+## License
 
 [MIT](LICENSE)

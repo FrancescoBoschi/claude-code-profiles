@@ -1,5 +1,5 @@
-// Test dell'estensione: API "vscode" simulata + ccm reale installato in un HOME temporaneo.
-// Uso: node vscode/test/run.js   (dalla root del pacchetto ccm)
+// Extension test: simulated "vscode" API + real ccm installed in a temporary HOME.
+// Usage: node vscode/test/run.js   (from the repository root)
 'use strict';
 const Module = require('module');
 const cp = require('child_process');
@@ -21,9 +21,9 @@ const sh = (c, cwd) => cp.execFileSync('bash', ['-c', c], { cwd: cwd || HOME, en
 sh(`bash "${ROOT}/install.sh" >/dev/null`);
 const CCM = path.join(HOME, '.local/share/ccm/bin/ccm');
 const W = path.join(T, 'work');
-for (const d of ['Work Repos/api', 'Work Repos/ui', 'Personal/side-project', 'libero']) fs.mkdirSync(path.join(W, d), { recursive: true });
-sh(`"${CCM}" add team --type team >/dev/null && "${CCM}" add mio --type personal >/dev/null && "${CCM}" add vertex --type vertex --project acme-bill --region global >/dev/null`);
-sh(`"${CCM}" bind team "${W}/Work Repos" >/dev/null && "${CCM}" bind mio "${W}/Personal/side-project" >/dev/null`);
+for (const d of ['Work Repos/api', 'Work Repos/ui', 'Personal/side-project', 'free']) fs.mkdirSync(path.join(W, d), { recursive: true });
+sh(`"${CCM}" add work --type team >/dev/null && "${CCM}" add personal --type personal >/dev/null && "${CCM}" add gcp --type vertex --project acme-bill --region global >/dev/null`);
+sh(`"${CCM}" bind work "${W}/Work Repos" >/dev/null && "${CCM}" bind personal "${W}/Personal/side-project" >/dev/null`);
 
 // ------------------------------------------------------------ stub vscode
 const state = { picks: [], warnings: [], infos: [], errors: [], terminals: [], executed: [], config: {}, folders: [] };
@@ -45,7 +45,7 @@ const vscode = {
       const want = nextPick();
       if (want === undefined) return undefined;
       const found = items.find(i => i.label.includes(want) || i.profile === want);
-      assert(found, `voce "${want}" non trovata tra: ${items.map(i => i.label).join(' | ')}`);
+      assert(found, `item "${want}" not found among: ${items.map(i => i.label).join(' | ')}`);
       return found;
     },
     showWarningMessage: async (msg, ...rest) => { state.warnings.push(msg); const b = rest.filter(x => typeof x === 'string'); return state.warnAnswer === undefined ? b[0] : state.warnAnswer; },
@@ -85,90 +85,90 @@ async function test(name, fn) {
 
 (async () => {
   state.folders = [folder('Work Repos/api'), folder('Work Repos/ui')];
-  state.warnAnswer = 'Non chiedere più';
+  state.warnAnswer = 'Don\'t Ask Again';
   ext.activate({ subscriptions: [], globalState });
   await wait(1500);
 
-  await test('barra di stato: profilo ereditato dalla cartella contenitore', () => {
-    assert.strictEqual(statusItem.text, '$(account) ccm: team');
-    assert(statusItem.tooltip.value.includes('(da '), statusItem.tooltip.value);
+  await test('status bar: profile inherited from the parent folder', () => {
+    assert.strictEqual(statusItem.text, '$(account) ccm: work');
+    assert(statusItem.tooltip.value.includes('(from '), statusItem.tooltip.value);
   });
-  await test('avviso all\'avvio se il pannello non passa da ccm', () => {
-    assert(state.warnings.some(w => w.includes('pannello Claude Code non passa da ccm')));
+  await test('startup warning when the panel does not go through ccm', () => {
+    assert(state.warnings.some(w => w.includes('panel does not go through ccm')));
     assert.strictEqual(globalState.get('ccm.skipWrapperCheck'), true);
   });
 
-  await test('configura pannello imposta claudeProcessWrapper sullo shim', async () => {
+  await test('configure panel sets claudeProcessWrapper to the shim', async () => {
     state.warnAnswer = undefined;
     await commands['ccm.configurePanel']();
     assert.strictEqual(state.config['claudeCode.claudeProcessWrapper'], path.join(HOME, '.local/share/ccm/shims/claude'));
   });
 
-  await test('workspace non associato → rosso', async () => {
-    state.folders = [folder('libero')];
+  await test('unbound workspace → red', async () => {
+    state.folders = [folder('free')];
     await commands['ccm.refresh']();
-    assert(statusItem.text.includes('nessun profilo'));
+    assert(statusItem.text.includes('no profile'));
     assert.strictEqual(statusItem.backgroundColor.id, 'statusBarItem.errorBackground');
   });
 
-  await test('associa: profilo vertex solo al progetto', async () => {
-    state.picks = ['vertex', 'libero'];
+  await test('bind: vertex profile to this project only', async () => {
+    state.picks = ['gcp', 'free'];
     await commands['ccm.bind']();
-    assert(projects().includes(`${W}/libero\tvertex`), projects());
-    assert.strictEqual(statusItem.text, '$(account) ccm: vertex · acme-bill');
+    assert(projects().includes(`${W}/free\tgcp`), projects());
+    assert.strictEqual(statusItem.text, '$(account) ccm: gcp · acme-bill');
   });
 
-  await test('cambio profilo chiede conferma e avvisa per le conversazioni', async () => {
+  await test('switching profile asks for confirmation and warns about conversations', async () => {
     state.warnings = [];
-    state.warnAnswer = 'Continua';
-    state.picks = ['mio', 'libero'];
+    state.warnAnswer = 'Continue';
+    state.picks = ['personal', 'free'];
     await commands['ccm.bind']();
-    assert(state.warnings.some(w => w.includes('conversazioni')));
-    assert(projects().includes(`${W}/libero\tmio`));
+    assert(state.warnings.some(w => w.includes('conversations')));
+    assert(projects().includes(`${W}/free\tpersonal`));
     assert.strictEqual(statusItem.backgroundColor.id, 'statusBarItem.warningBackground');
   });
 
-  await test('annullando la conferma non cambia nulla', async () => {
+  await test('cancelling the confirmation changes nothing', async () => {
     state.warnAnswer = null;
-    state.picks = ['team', 'libero'];
+    state.picks = ['work', 'free'];
     await commands['ccm.bind']();
-    assert(projects().includes(`${W}/libero\tmio`));
+    assert(projects().includes(`${W}/free\tpersonal`));
   });
 
-  await test('multi-root con profili diversi → avviso', async () => {
+  await test('multi-root with different profiles → warning', async () => {
     state.folders = [folder('Work Repos/api'), folder('Personal/side-project')];
     await commands['ccm.refresh']();
     assert(statusItem.text.endsWith('$(warning)'));
-    assert(statusItem.tooltip.value.includes('prima'));
+    assert(statusItem.tooltip.value.includes('first'));
   });
 
-  await test('terminale con profilo diverso usa CCM_OVERRIDE', async () => {
-    state.folders = [folder('libero')];
-    state.picks = ['vertex'];
+  await test('terminal with a different profile uses CCM_OVERRIDE', async () => {
+    state.folders = [folder('free')];
+    state.picks = ['gcp'];
     await commands['ccm.openTerminal']();
     const t = state.terminals.pop();
-    assert.deepStrictEqual(t.opts.env, { CCM_OVERRIDE: 'vertex' });
+    assert.deepStrictEqual(t.opts.env, { CCM_OVERRIDE: 'gcp' });
     assert.deepStrictEqual(t.sent, ['claude']);
   });
 
-  await test('rimuovi associazione ereditata chiede conferma', async () => {
+  await test('removing an inherited binding asks for confirmation', async () => {
     state.folders = [folder('Work Repos/ui')];
     state.warnings = [];
-    state.warnAnswer = 'Rimuovi comunque';
+    state.warnAnswer = 'Remove Anyway';
     await commands['ccm.unbind']();
-    assert(state.warnings.some(w => w.includes('ereditato')));
-    assert(!projects().includes('Work Repos\tteam'));
+    assert(state.warnings.some(w => w.includes('inherited')));
+    assert(!projects().includes('Work Repos\twork'));
   });
 
-  await test('ccm assente → errore leggibile', async () => {
-    state.config['ccm.path'] = '/non/esiste/ccm';
+  await test('missing ccm → readable error', async () => {
+    state.config['ccm.path'] = '/does/not/exist/ccm';
     state.errors = [];
     await commands['ccm.bind']();
-    assert(state.errors.some(e => e.includes('ccm non trovato')), state.errors.join());
+    assert(state.errors.some(e => e.includes('ccm not found')), state.errors.join());
     delete state.config['ccm.path'];
   });
 
-  console.log(`\nRisultato: ${pass} ok, ${fail} falliti`);
+  console.log(`\nResult: ${pass} passed, ${fail} failed`);
   fs.rmSync(T, { recursive: true, force: true });
   process.exit(fail ? 1 : 0);
 })();
