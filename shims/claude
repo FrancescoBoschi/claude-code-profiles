@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# ccm shim: sostituisce "claude" nel PATH, applica il profilo del progetto
+# corrente e poi esegue il claude reale con gli stessi argomenti.
+set -euo pipefail
+CCM_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$CCM_ROOT/lib/ccm-common.sh"
+
+# Modalità wrapper (claudeCode.claudeProcessWrapper di VS Code): l'estensione
+# passa come primo argomento il proprio binario claude, da usare al posto di
+# quello nel PATH perché allineato alla versione del pannello.
+if [ $# -gt 0 ] && [ "${1##*/}" = claude ] && [ -f "$1" ] && [ -x "$1" ] && ! [ "$1" -ef "$0" ]; then
+  real="$1"; shift
+else
+  real="$(ccm_real_claude)" || ccm_die "binario 'claude' reale non trovato nel PATH (installa Claude Code o imposta CCM_REAL_CLAUDE)"
+fi
+
+# Via di fuga esplicita: nessuna gestione dei profili.
+if [ "${CCM_BYPASS:-}" = 1 ]; then exec "$real" ${1+"$@"}; fi
+
+# Comandi che non dipendono dall'account.
+case "${1:-}" in
+  -v|--version|-h|--help|update) exec "$real" ${1+"$@"} ;;
+esac
+
+here="$(pwd -P)"
+if [ -n "${CCM_OVERRIDE:-}" ]; then
+  prof="$CCM_OVERRIDE"
+else
+  match="$(ccm_resolve "$here")"
+  prof="${match%%"$CCM_TAB"*}"
+fi
+
+if [ -z "$prof" ]; then
+  {
+    echo "ccm: nessun profilo associato a $(ccm_tilde "$here")"
+    echo "     associa il progetto:   ccm bind <profilo>"
+    echo "     oppure una tantum:     ccm run <profilo> [argomenti]"
+    echo "     profili disponibili:   $(ccm_profile_names | tr '\n' ' ')"
+  } >&2
+  exit 1
+fi
+
+ccm_load_profile "$prof"
+exec "$real" ${1+"$@"}

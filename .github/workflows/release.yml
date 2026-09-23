@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verifica che il tag corrisponda alla versione
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "^CCM_VERSION=\"$v\"" lib/ccm-common.sh || { echo "CCM_VERSION non è $v"; exit 1; }
+          test "$(node -p "require('./vscode/package.json').version")" = "$v" || { echo "vscode/package.json non è $v"; exit 1; }
+      - name: Test
+        run: bash tests/smoke.sh && node vscode/test/run.js
+      - name: Build estensione VS Code
+        run: |
+          cp LICENSE vscode/LICENSE
+          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccm-vscode.vsix
+      - name: Archivio
+        run: |
+          mkdir -p dist/ccm
+          cp -R bin lib shims tests vscode install.sh README.md LICENSE CHANGELOG.md dist/ccm/
+          rm -f dist/ccm/vscode/LICENSE
+          cp ccm-vscode.vsix dist/ccm/
+          tar czf ccm.tar.gz -C dist ccm
+      - name: Pubblica la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" ccm.tar.gz ccm-vscode.vsix \
+            --title "ccm $GITHUB_REF_NAME" --generate-notes

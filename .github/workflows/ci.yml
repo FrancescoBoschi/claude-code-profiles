@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versione di bash usata dagli script
+        run: /bin/bash --version | head -n1
+      - name: Test CLI
+        run: /bin/bash tests/smoke.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Test estensione VS Code
+        run: node vscode/test/run.js
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -s bash bin/ccm shims/claude lib/ccm-common.sh install.sh tests/smoke.sh
+      - name: Versioni allineate
+        run: |
+          cli=$(sed -n 's/^CCM_VERSION="\(.*\)"/\1/p' lib/ccm-common.sh)
+          ext=$(node -p "require('./vscode/package.json').version")
+          echo "CLI $cli — estensione $ext"
+          test "$cli" = "$ext"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build estensione (verifica)
+        run: |
+          cp LICENSE vscode/LICENSE
+          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccm-vscode.vsix

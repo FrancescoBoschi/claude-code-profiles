@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+# ccm — Claude Code Manager: un account per progetto, in automatico.
+set -euo pipefail
+CCM_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$CCM_ROOT/lib/ccm-common.sh"
+
+usage() {
+  cat <<EOF
+ccm $CCM_VERSION — un account Claude Code per progetto
+
+Uso: ccm <comando> [argomenti]
+
+Profili
+  add <nome> [--type team|personal|vertex] [--project ID] [--region R] [--gcloud-config NOME]
+                        crea un profilo (chiede i dati mancanti)
+  login <nome>          primo login del profilo (OAuth o credenziali gcloud)
+  edit <nome>           apre il file del profilo in \$EDITOR
+  remove <nome>         elimina il profilo e le sue associazioni
+
+Progetti
+  bind <profilo> [dir]  associa un progetto (default: root git o dir corrente)
+  unbind [dir]          rimuove l'associazione
+  which [dir] [--json]  mostra quale profilo verrebbe usato qui
+
+Varie
+  list [--json]         profili e progetti associati
+  run <profilo> [args]  lancia claude con un profilo forzato, una tantum
+  doctor                verifica installazione, PATH, login e associazioni
+  init                  snippet da mettere nel file rc della shell
+  version
+
+Una volta associato un progetto basta lanciare "claude" come sempre.
+EOF
+}
+
+need_profile() {
+  [ -n "${1:-}" ] || ccm_die "specifica un profilo"
+  ccm_profile_exists "$1" || ccm_die "profilo '$1' inesistente (profili: $(ccm_profile_names | tr '\n' ' '))"
+}
+
+ask() { # prompt default -> stampa la risposta
+  local ans=""
+  if [ -t 0 ]; then
+    printf '%s%s: ' "$1" "${2:+ [$2]}" >&2
+    read -r ans || true
+  fi
+  printf '%s' "${ans:-${2:-}}"
+}
+
+cmd_add() {
+  local name="${1:-}" type="" project="" region="" gcfg=""
+  [ -n "$name" ] || ccm_die "uso: ccm add <nome> [--type team|personal|vertex] ..."
+  shift
+  ccm_valid_name "$name" || ccm_die "nome non valido: usa lettere, numeri, '-' e '_'"
+  ccm_profile_exists "$name" && ccm_die "il profilo '$name' esiste già (modificalo con: ccm edit $name)"
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || ccm_die "manca il valore per $1"
+    case "$1" in
+      --type) type="$2" ;;
+      --project) project="$2" ;;
+      --region) region="$2" ;;
+      --gcloud-config) gcfg="$2" ;;
+      *) ccm_die "opzione sconosciuta: $1" ;;
+    esac
+    shift 2
+  done
+
+  [ -n "$type" ] || type="$(ask "Tipo (team / personal / vertex)" "")"
+  case "$type" in team|personal|vertex) ;; *) ccm_die "tipo non valido: '$type'" ;; esac
+
+  if [ "$type" = vertex ]; then
+    [ -n "$project" ] || project="$(ask "Progetto GCP per il billing" "")"
+    [ -n "$project" ] || ccm_die "per un profilo vertex serve --project"
+    [ -n "$region" ] || region="$(ask "Regione Vertex (CLOUD_ML_REGION)" "global")"
+    [ -n "$gcfg" ] || gcfg="$(ask "Configurazione gcloud da usare (vuoto = quella attiva)" "")"
+  fi
+
+  local dir="$CCM_ACCOUNTS_DIR/$name" f
+  f="$(ccm_profile_file "$name")"
+  mkdir -p "$CCM_PROFILES_DIR" "$dir"
+  chmod 700 "$CCM_HOME" "$CCM_PROFILES_DIR" "$dir" 2>/dev/null || true
+  {
+    echo "# Profilo ccm: $name"
+    printf 'CCM_KIND=%q\n' "$type"
+    printf 'CLAUDE_CONFIG_DIR=%q\n' "$dir"
+    if [ "$type" = vertex ]; then
+      echo "CLAUDE_CODE_USE_VERTEX=1"
+      printf 'CLOUD_ML_REGION=%q\n' "$region"
+      printf 'ANTHROPIC_VERTEX_PROJECT_ID=%q\n' "$project"
+      [ -z "$gcfg" ] || printf 'CLOUDSDK_ACTIVE_CONFIG_NAME=%q\n' "$gcfg"
+    fi
+  } > "$f"
+  chmod 600 "$f"
+
+  # Statusline di Claude Code con il profilo attivo (solo se non esiste già).
+  if [ ! -f "$dir/settings.json" ]; then
+    cat > "$dir/settings.json" <<EOF
+{
+  "statusLine": {
+    "type": "command",
+    "command": "\"$CCM_ROOT/bin/ccm\" statusline"
+  }
+}
+EOF
+  fi
+
+  echo "✓ profilo '$name' ($type) creato"
+  echo "  config dir: $(ccm_tilde "$dir")"
+  echo "  prossimi passi:"
+  echo "    ccm login $name"
+  echo "    cd <progetto> && ccm bind $name"
+}
+
+cmd_login() {
+  need_profile "${1:-}"
+  local name="$1" kind real
+  kind="$(ccm_profile_get "$name" CCM_KIND)"
+  if [ "$kind" = vertex ]; then
+    command -v gcloud >/dev/null || ccm_die "gcloud non trovato: installa Google Cloud SDK"
+    ( ccm_load_profile "$name"; gcloud auth application-default login )
+    echo "✓ credenziali ADC aggiornate per '$name'"
+  else
+    real="$(ccm_real_claude)" || ccm_die "binario 'claude' reale non trovato nel PATH"
+    echo "Avvio Claude Code con il profilo '$name'."
+    echo "Se non compare la schermata di login, digita /login. Esci con /exit a fine login."
+    ( ccm_load_profile "$name"; exec "$real" )
+  fi
+}
+
+cmd_bind() {
+  need_profile "${1:-}"
+  local prof="$1" target
+  if [ -n "${2:-}" ]; then
+    target="$(ccm_realdir "$2")"; [ -n "$target" ] || ccm_die "directory inesistente: $2"
+  else
+    target="$(ccm_default_target)"
+  fi
+  mkdir -p "$CCM_HOME"; touch "$CCM_PROJECTS_FILE"
+  ccm_projects_remove "$target"
+  printf '%s\t%s\n' "$target" "$prof" >> "$CCM_PROJECTS_FILE"
+  echo "✓ $(ccm_tilde "$target") → $prof"
+}
+
+cmd_unbind() {
+  local target
+  if [ -n "${1:-}" ]; then
+    target="$(ccm_realdir "$1")"; [ -n "$target" ] || ccm_die "directory inesistente: $1"
+  else
+    target="$(ccm_default_target)"
+  fi
+  if [ -f "$CCM_PROJECTS_FILE" ] && cut -f1 "$CCM_PROJECTS_FILE" | grep -Fqx -- "$target"; then
+    ccm_projects_remove "$target"
+    echo "✓ rimossa l'associazione di $(ccm_tilde "$target")"
+  else
+    ccm_warn "nessuna associazione diretta per $(ccm_tilde "$target") (vedi: ccm which)"
+    return 1
+  fi
+}
+
+# JSON: stringa con escape, oppure null se vuota
+jstr() {
+  if [ -z "$1" ]; then printf 'null'; return; fi
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$(printf '\t')/\\\\t/g")"
+}
+
+cmd_which() {
+  local a json=0 arg="" dir match="" prof via="" src="" bound="" kind="" cfg="" proj="" region="" root sf exists=1
+  local warns=""
+  for a in ${1+"$@"}; do
+    case "$a" in --json) json=1 ;; *) arg="$a" ;; esac
+  done
+  dir="$(ccm_realdir "${arg:-.}")"; [ -n "$dir" ] || ccm_die "directory inesistente: ${arg:-.}"
+  if [ -n "${CCM_OVERRIDE:-}" ]; then
+    prof="$CCM_OVERRIDE"; src=override; via="override CCM_OVERRIDE"
+  else
+    match="$(ccm_resolve "$dir")"
+    prof="${match%%"$CCM_TAB"*}"
+    if [ -n "$prof" ]; then src=bind; bound="${match#*"$CCM_TAB"}"; via="associato a $(ccm_tilde "$bound")"; fi
+  fi
+  if [ -n "$prof" ] && ccm_profile_exists "$prof"; then
+    kind="$(ccm_profile_get "$prof" CCM_KIND)"
+    cfg="$(ccm_profile_get "$prof" CLAUDE_CONFIG_DIR)"
+    proj="$(ccm_profile_get "$prof" ANTHROPIC_VERTEX_PROJECT_ID)"
+    region="$(ccm_profile_get "$prof" CLOUD_ML_REGION)"
+  elif [ -n "$prof" ]; then
+    exists=0
+  fi
+
+  # Settings del repo che possono scavalcare il profilo.
+  root="$( (cd "$dir" && git rev-parse --show-toplevel 2>/dev/null) || true)"
+  [ -n "$root" ] || root="$dir"
+  for sf in "$root/.claude/settings.json" "$root/.claude/settings.local.json"; do
+    [ -f "$sf" ] || continue
+    if grep -Eq '"(CLAUDE_CONFIG_DIR|CLAUDE_CODE_USE_[A-Z]+|ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|VERTEX_PROJECT_ID)|CLOUD_ML_REGION|GOOGLE_CLOUD_PROJECT)"' "$sf"; then
+      warns="$warns$sf"$'\n'
+    fi
+  done
+
+  if [ $json = 1 ]; then
+    printf '{"dir":%s,"profile":%s,"exists":%s,"source":%s,"boundPath":%s,"kind":%s,"configDir":%s,"vertexProject":%s,"region":%s,"conflictingSettings":[' \
+      "$(jstr "$dir")" "$(jstr "$prof")" "$([ $exists = 1 ] && echo true || echo false)" "$(jstr "$src")" \
+      "$(jstr "$bound")" "$(jstr "$kind")" "$(jstr "$cfg")" "$(jstr "$proj")" "$(jstr "$region")"
+    local first=1 w
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      [ $first = 1 ] || printf ','; first=0
+      jstr "$w"
+    done <<EOF
+$warns
+EOF
+    printf ']}\n'
+    return 0
+  fi
+
+  echo "Directory:   $(ccm_tilde "$dir")"
+  if [ -z "$prof" ]; then
+    echo "Profilo:     nessuno — claude verrà bloccato qui (usa: ccm bind <profilo>)"
+    return 1
+  fi
+  if [ $exists = 0 ]; then
+    echo "Profilo:     $prof — ATTENZIONE: profilo inesistente"
+    return 1
+  fi
+  echo "Profilo:     $prof ($kind), $via"
+  echo "Config dir:  $(ccm_tilde "$cfg")"
+  [ "$kind" != vertex ] || echo "Progetto GCP: $proj  regione: $region"
+  while IFS= read -r w; do
+    [ -n "$w" ] && echo "ATTENZIONE: $(ccm_tilde "$w") imposta variabili di account/provider che possono scavalcare il profilo"
+  done <<EOF
+$warns
+EOF
+  return 0
+}
+
+cmd_list_json() {
+  local n first=1 p prof
+  printf '{"version":%s,"shim":%s,"home":%s,"profiles":[' "$(jstr "$CCM_VERSION")" "$(jstr "$CCM_ROOT/shims/claude")" "$(jstr "$CCM_HOME")"
+  for n in $(ccm_profile_names); do
+    [ $first = 1 ] || printf ','; first=0
+    printf '{"name":%s,"kind":%s,"configDir":%s,"vertexProject":%s}' "$(jstr "$n")" \
+      "$(jstr "$(ccm_profile_get "$n" CCM_KIND)")" "$(jstr "$(ccm_profile_get "$n" CLAUDE_CONFIG_DIR)")" \
+      "$(jstr "$(ccm_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)")"
+  done
+  printf '],"bindings":['
+  first=1
+  if [ -f "$CCM_PROJECTS_FILE" ]; then
+    while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+      case "$p" in ''|'#'*) continue ;; esac
+      [ $first = 1 ] || printf ','; first=0
+      printf '{"path":%s,"profile":%s,"profileExists":%s}' "$(jstr "$p")" "$(jstr "$prof")" \
+        "$(ccm_profile_exists "$prof" && echo true || echo false)"
+    done < "$CCM_PROJECTS_FILE"
+  fi
+  printf ']}\n'
+}
+
+cmd_list() {
+  if [ "${1:-}" = --json ]; then cmd_list_json; return; fi
+  local n kind dir extra p prof
+  echo "Profili:"
+  if [ -z "$(ccm_profile_names)" ]; then echo "  (nessuno — crea il primo con: ccm add <nome>)"; fi
+  for n in $(ccm_profile_names); do
+    kind="$(ccm_profile_get "$n" CCM_KIND)"
+    dir="$(ccm_tilde "$(ccm_profile_get "$n" CLAUDE_CONFIG_DIR)")"
+    extra=""
+    [ "$kind" != vertex ] || extra="progetto: $(ccm_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)"
+    printf '  %-14s %-9s %s  %s\n' "$n" "$kind" "$dir" "$extra"
+  done
+  echo "Progetti:"
+  if [ ! -s "$CCM_PROJECTS_FILE" ] || ! grep -qv '^#' "$CCM_PROJECTS_FILE"; then
+    echo "  (nessuno — associa con: cd <progetto> && ccm bind <profilo>)"; return 0
+  fi
+  while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+    case "$p" in ''|'#'*) continue ;; esac
+    if ccm_profile_exists "$prof"; then extra=""; else extra="  (profilo inesistente!)"; fi
+    printf '  %-40s → %s%s\n' "$(ccm_tilde "$p")" "$prof" "$extra"
+  done < "$CCM_PROJECTS_FILE"
+}
+
+cmd_run() {
+  need_profile "${1:-}"
+  local prof="$1"; shift
+  CCM_OVERRIDE="$prof" exec "$CCM_ROOT/shims/claude" ${1+"$@"}
+}
+
+cmd_statusline() {
+  [ -t 0 ] || cat >/dev/null   # Claude Code passa un JSON su stdin: non serve
+  local out="ccm: ${CCM_PROFILE:-?}"
+  [ "${CCM_KIND:-}" != vertex ] || out="$out · vertex ${ANTHROPIC_VERTEX_PROJECT_ID:-}"
+  [ "${CCM_KIND:-}" != personal ] || out="$out · PERSONALE"
+  printf '%s\n' "$out"
+}
+
+cmd_doctor() {
+  local ok=0 real v n kind dir p prof cfg
+  echo "ccm $CCM_VERSION in $(ccm_tilde "$CCM_ROOT")"
+  if [ "$(command -v claude 2>/dev/null || true)" = "$CCM_ROOT/shims/claude" ]; then
+    echo "✓ lo shim ccm è il primo 'claude' nel PATH"
+  else
+    echo "✗ il primo 'claude' nel PATH è $(command -v claude 2>/dev/null || echo 'nessuno'): la riga di ccm deve essere l'ULTIMA del file rc"; ok=1
+  fi
+  if real="$(ccm_real_claude)"; then
+    echo "✓ claude reale: $(ccm_tilde "$real") ($("$real" --version 2>/dev/null | head -n1 || echo 'versione sconosciuta'))"
+  else
+    echo "✗ claude reale non trovato nel PATH"; ok=1
+  fi
+  for v in $CCM_MANAGED_VARS; do
+    case "$v" in CCM_*) continue ;; esac
+    if [ -n "${!v:-}" ]; then echo "! $v è impostata nella shell: lo shim la ignora, ma verifica che non serva altrove"; fi
+  done
+  for n in $(ccm_profile_names); do
+    kind="$(ccm_profile_get "$n" CCM_KIND)"; dir="$(ccm_profile_get "$n" CLAUDE_CONFIG_DIR)"
+    if [ ! -d "$dir" ]; then echo "✗ [$n] config dir mancante: $(ccm_tilde "$dir")"; ok=1; continue; fi
+    if [ "$kind" = vertex ]; then
+      cfg="$(ccm_profile_get "$n" CLOUDSDK_ACTIVE_CONFIG_NAME)"
+      if ! command -v gcloud >/dev/null; then echo "✗ [$n] gcloud non installato"; ok=1
+      elif CLOUDSDK_ACTIVE_CONFIG_NAME="${cfg:-${CLOUDSDK_ACTIVE_CONFIG_NAME:-}}" gcloud auth application-default print-access-token >/dev/null 2>&1; then
+        echo "✓ [$n] credenziali ADC valide"
+      else echo "✗ [$n] credenziali ADC assenti o scadute: ccm login $n"; ok=1; fi
+    elif [ -f "$dir/.credentials.json" ] || grep -qs '"oauthAccount"' "$dir/.claude.json"; then
+      echo "✓ [$n] login rilevato"
+    else
+      echo "? [$n] login non rilevato (su macOS le credenziali stanno nel Portachiavi: verifica con /status, o esegui: ccm login $n)"
+    fi
+  done
+  if [ -f "$CCM_PROJECTS_FILE" ]; then
+    while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+      case "$p" in ''|'#'*) continue ;; esac
+      ccm_profile_exists "$prof" || { echo "✗ $(ccm_tilde "$p") → '$prof' (profilo inesistente)"; ok=1; }
+      [ -d "$p" ] || echo "! $(ccm_tilde "$p") non esiste più (rimuovi con: ccm unbind \"$p\")"
+    done < "$CCM_PROJECTS_FILE"
+  fi
+  return $ok
+}
+
+cmd_init() {
+  cat <<EOF
+export PATH="$CCM_ROOT/shims:$CCM_ROOT/bin:\$PATH"
+_ccm_complete() {
+  local cur="\${COMP_WORDS[COMP_CWORD]}" prev="\${COMP_WORDS[1]:-}"
+  if [ "\$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=(\$(compgen -W "add login edit remove bind unbind which list run doctor init version help" -- "\$cur"))
+  elif [ "\$COMP_CWORD" -eq 2 ]; then
+    case "\$prev" in
+      login|edit|remove|bind|run) COMPREPLY=(\$(compgen -W "\$(ls "$CCM_PROFILES_DIR" 2>/dev/null | sed 's/\\.env\$//')" -- "\$cur")) ;;
+      unbind|which) COMPREPLY=(\$(compgen -d -- "\$cur")) ;;
+    esac
+  fi
+}
+if [ -n "\${ZSH_VERSION:-}" ]; then
+  autoload -U +X compinit 2>/dev/null && { whence compdef >/dev/null || compinit -u; }
+  autoload -U +X bashcompinit 2>/dev/null && bashcompinit
+fi
+command -v complete >/dev/null 2>&1 && complete -F _ccm_complete ccm
+EOF
+}
+
+cmd_edit()   { need_profile "${1:-}"; "${EDITOR:-vi}" "$(ccm_profile_file "$1")"; }
+
+cmd_remove() {
+  need_profile "${1:-}"
+  local dir; dir="$(ccm_profile_get "$1" CLAUDE_CONFIG_DIR)"
+  rm -f "$(ccm_profile_file "$1")"
+  if [ -f "$CCM_PROJECTS_FILE" ]; then
+    P="$1" awk -F'\t' '$2 != ENVIRON["P"]' "$CCM_PROJECTS_FILE" > "$CCM_PROJECTS_FILE.tmp.$$"
+    mv "$CCM_PROJECTS_FILE.tmp.$$" "$CCM_PROJECTS_FILE"
+  fi
+  echo "✓ profilo '$1' e relative associazioni rimossi"
+  echo "  la config dir con credenziali e sessioni è rimasta in $(ccm_tilde "$dir"): cancellala a mano se non serve più"
+}
+
+cmd="${1:-help}"; [ $# -eq 0 ] || shift
+case "$cmd" in
+  add) cmd_add ${1+"$@"} ;;
+  login) cmd_login ${1+"$@"} ;;
+  edit) cmd_edit ${1+"$@"} ;;
+  remove|rm) cmd_remove ${1+"$@"} ;;
+  bind) cmd_bind ${1+"$@"} ;;
+  unbind) cmd_unbind ${1+"$@"} ;;
+  which) cmd_which ${1+"$@"} ;;
+  list|ls) cmd_list ${1+"$@"} ;;
+  run) cmd_run ${1+"$@"} ;;
+  doctor) cmd_doctor ;;
+  statusline) cmd_statusline ;;
+  init) cmd_init ;;
+  version|--version|-v) echo "ccm $CCM_VERSION" ;;
+  help|--help|-h) usage ;;
+  *) ccm_warn "comando sconosciuto: $cmd"; usage >&2; exit 1 ;;
+esac

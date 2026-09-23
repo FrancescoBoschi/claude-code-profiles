@@ -1,0 +1,5 @@
+*.vsix
+dist/
+node_modules/
+vscode/LICENSE
+.DS_Store

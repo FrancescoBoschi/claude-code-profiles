@@ -1,0 +1,97 @@
+{
+  "name": "ccm-vscode",
+  "displayName": "ccm — Claude Code Manager",
+  "description": "Mostra e cambia il profilo Claude Code (Team, personale, Vertex AI) di ogni workspace tramite la CLI ccm. Progetto non ufficiale.",
+  "version": "0.2.0",
+  "publisher": "francescoboschi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FrancescoBoschi/claude-code-profiles.git"
+  },
+  "homepage": "https://github.com/FrancescoBoschi/claude-code-profiles#readme",
+  "bugs": {
+    "url": "https://github.com/FrancescoBoschi/claude-code-profiles/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude code",
+    "vertex ai",
+    "accounts",
+    "profiles"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ccm.menu",
+        "title": "Menu",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.bind",
+        "title": "Associa profilo al workspace",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.unbind",
+        "title": "Rimuovi associazione",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.openTerminal",
+        "title": "Apri terminale Claude con profilo…",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.list",
+        "title": "Mostra profili e progetti",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.doctor",
+        "title": "Doctor",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.configurePanel",
+        "title": "Configura pannello Claude Code",
+        "category": "ccm"
+      },
+      {
+        "command": "ccm.refresh",
+        "title": "Aggiorna stato",
+        "category": "ccm"
+      }
+    ],
+    "configuration": {
+      "title": "ccm",
+      "properties": {
+        "ccm.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Percorso dell'eseguibile `ccm`. Vuoto = `~/.local/share/ccm/bin/ccm`, altrimenti `ccm` dal PATH."
+        },
+        "ccm.highlightPersonal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Evidenzia la barra di stato quando il workspace usa un profilo personale."
+        },
+        "ccm.checkClaudeWrapper": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "All'avvio verifica che `claudeCode.claudeProcessWrapper` punti allo shim di ccm."
+        }
+      }
+    }
+  }
+}
