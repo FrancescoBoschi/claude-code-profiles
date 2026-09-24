@@ -10,6 +10,10 @@
 
 **One Claude Code account per project, applied automatically.**
 
+<p align="center">
+  <img src="docs/demo.gif" alt="ccprof demo: each project starts Claude Code with its own account" width="100%">
+</p>
+
 If you use Claude Code with more than one account (a company Team plan, one or more
 personal accounts, billing through Google Vertex AI or Amazon Bedrock, a Console API key)
 `ccprof` lets you bind each project to
