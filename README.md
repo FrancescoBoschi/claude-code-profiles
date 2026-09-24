@@ -11,7 +11,8 @@
 **One Claude Code account per project, applied automatically.**
 
 If you use Claude Code with more than one account (a company Team plan, one or more
-personal accounts, billing through Google Vertex AI) `ccprof` lets you bind each project to
+personal accounts, billing through Google Vertex AI or Amazon Bedrock, a Console API key)
+`ccprof` lets you bind each project to
 its account once. From then on you just run `claude` as usual, in the terminal or in the
 VS Code panel, and it starts with the right account. No logging out, no environment
 variables to remember, no risk of billing the wrong project.
@@ -31,9 +32,10 @@ variables to remember, no risk of billing the wrong project.
 
 - **Set it once per project.** Bindings live outside your repositories, so nothing ends up in shared commits.
 - **As many profiles as you need**, with any name you like: two personal accounts, several GCP projects, a client's Team plan.
+- **Every way to pay for Claude Code**: Pro/Max/Team/Enterprise subscriptions, Google Vertex AI, Amazon Bedrock and Anthropic Console API keys.
 - **Fail-closed.** In a folder with no profile, `claude` refuses to start instead of silently using the wrong account.
 - **Terminal and VS Code.** The official Claude Code panel uses the same profiles, and a status bar shows which one is active.
-- **Private by design.** No telemetry, no network calls at runtime, no dependencies beyond bash. Credentials never leave your machine and stay where Claude Code and gcloud already keep them.
+- **Private by design.** No telemetry, no network calls at runtime, no dependencies beyond bash. Credentials never leave your machine: logins stay where Claude Code, gcloud and aws keep them, and API keys live in your OS keychain, never in a file.
 
 ## Contents
 
@@ -55,6 +57,8 @@ variables to remember, no risk of billing the wrong project.
 - **macOS or Linux** (on Windows: inside WSL). Works with zsh and bash, including the bash 3.2 that ships with macOS.
 - **Claude Code** already installed (`claude --version`).
 - For Vertex AI profiles: the **Google Cloud SDK** (`gcloud`) and a GCP project with Claude models enabled in Vertex AI.
+- For Bedrock profiles: AWS credentials (the **AWS CLI** is recommended) and Claude models enabled in Amazon Bedrock.
+- For API key profiles: the macOS Keychain, or `secret-tool` (libsecret) on Linux.
 - For the extension: **VS Code** with the official Claude Code extension.
 
 ## Installation
@@ -102,18 +106,28 @@ The first line should read `✓ the ccprof shim is the first 'claude' on PATH`.
 
 ### 1. Create one profile per account
 
-You do this **once**, from any folder. The name is up to you; `--type` only tells ccprof how
-the account authenticates and how to display it. Create as many profiles as you need.
+You do this **once**, from any folder. The name is up to you. `--auth` says how the account
+authenticates, `--tag` whether it is a work or a personal account (personal ones are
+highlighted). Create as many profiles as you need.
 
 ```bash
-ccprof add work     --type team        # company account on a Team plan
-ccprof add personal --type personal    # your personal subscription
-ccprof add side     --type personal    # a second personal account
-ccprof add gcp-prod --type vertex --project MY-GCP-PROJECT --region global
+ccprof add work     --auth subscription --tag work        # company Team/Enterprise plan
+ccprof add personal --auth subscription --tag personal    # your Pro/Max subscription
+ccprof add side     --auth subscription --tag personal    # a second personal account
+ccprof add gcp-prod --auth vertex  --project MY-GCP-PROJECT --region global
+ccprof add aws-dev  --auth bedrock --region us-east-1 --aws-profile dev
+ccprof add console  --auth api-key --tag personal         # asks for the key, stores it in the keychain
 ```
 
-Run `ccprof add <name>` without options to be asked interactively. For Vertex you can add
-`--gcloud-config NAME` to use a specific gcloud configuration.
+| `--auth` | Billing | Extra options |
+|---|---|---|
+| `subscription` (default) | Pro, Max, Team or Enterprise plan, via login | — |
+| `vertex` | a Google Cloud project | `--project ID`, `--region R` (default `global`), `--gcloud-config NAME` |
+| `bedrock` | an AWS account | `--region R`, `--aws-profile NAME` |
+| `api-key` | an Anthropic Console API key | the key is read from the prompt (or stdin) and stored in the OS keychain |
+
+Run `ccprof add <name>` without options to be asked interactively. The pre-0.5 form
+`--type team|personal|vertex` still works.
 
 ### 2. Log in once per profile
 
@@ -124,7 +138,9 @@ ccprof login side
 ccprof login gcp-prod   # for Vertex this runs: gcloud auth application-default login
 ```
 
-Each profile keeps its own credentials, so you never have to log in again.
+Bedrock profiles use your AWS credentials (`ccprof login` runs `aws sso login` when the
+profile has an `--aws-profile`); API key profiles need no login. Each profile keeps its own
+credentials, so you never have to log in again.
 
 ### 3. Bind your projects
 
@@ -211,13 +227,14 @@ same profile.
 
 | Command | What it does |
 |---|---|
-| `ccprof add <name> [--type team\|personal\|vertex] [--project ID] [--region R] [--gcloud-config N]` | create a profile with its own isolated config dir |
-| `ccprof login <name>` | first OAuth login, or refresh gcloud credentials for Vertex |
+| `ccprof add <name> [--auth A] [--tag work\|personal] [options]` | create a profile with its own isolated config dir (see [the table above](#1-create-one-profile-per-account)) |
+| `ccprof login <name>` | log in (subscription), refresh cloud credentials (Vertex, Bedrock) or replace the stored key (API key) |
 | `ccprof rename <old> <new>` | rename a profile and update its bindings (logins are kept) |
 | `ccprof bind <profile> [dir]` | bind a project (default: git root, otherwise the current folder) |
 | `ccprof unbind [dir]` | remove the binding |
 | `ccprof which [dir] [--json]` | the profile that would be used, and warnings about conflicting repo settings |
 | `ccprof current [dir]` | just the profile name (exit code 1 if none) |
+| `ccprof import [dir] [--from DIR]` | copy the project's older conversations (default: from `~/.claude`) into its profile |
 | `ccprof list [--json]` | profiles and bound projects |
 | `ccprof run <profile> [args]` | run claude with a forced profile |
 | `ccprof doctor` | check PATH, logins, credentials and orphaned bindings |
@@ -235,10 +252,14 @@ Useful variables: `CCPROF_OVERRIDE=<profile>` forces a profile, `CCPROF_BYPASS=1
   with the longest path wins, and paths are resolved to their physical location (symlinks included).
 - **Shim.** `~/.local/share/ccprof/shims/claude` comes before the real `claude` on PATH. On
   every start it finds the profile for the current folder, **clears** every variable that
-  could change the account, provider or billing project (`ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
-  `GOOGLE_CLOUD_PROJECT`, `GCLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`…), applies
-  the profile and starts the real binary.
+  could change the account or provider (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`…), applies the profile and starts the real
+  binary. Cloud credentials are cleared only where they matter: GCP variables
+  (`GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`…) for Vertex profiles, AWS
+  variables (`AWS_PROFILE`, `AWS_ACCESS_KEY_ID`…) for Bedrock profiles. In other projects
+  `gcloud` and `aws` keep working for the tools Claude runs.
+- **API keys.** They are stored in the macOS Keychain or libsecret (service `ccprof`) and
+  handed to Claude Code through its `apiKeyHelper` setting, so they never sit in a file.
 - **VS Code panel.** With `claudeProcessWrapper`, the Claude Code extension calls the shim
   and passes its own binary: the shim applies the profile and runs that binary, so the
   version always matches the panel.
@@ -249,7 +270,18 @@ Useful variables: `CCPROF_OVERRIDE=<profile>` forces a profile, `CCPROF_BYPASS=1
 
 Conversations from **before** ccprof live in `~/.claude/projects/` and ccprof does not touch
 them. A new profile will not see them, though, because each profile has its own folder.
-Two options:
+
+**Import them** (recommended): bind the project, close its running sessions, then
+
+```bash
+cd ~/work/platform && ccprof import
+```
+
+It copies the project's conversations from `~/.claude` into the profile, never overwrites
+anything and leaves the originals where they are. Then pick one with `claude --resume`.
+Use `--from DIR` if they live in another config folder.
+
+Or do it by hand:
 
 **Reuse `~/.claude` for one profile.** For the account you are already logged in with,
 run `ccprof edit <name>` and set `CLAUDE_CONFIG_DIR=/Users/YOUR-USER-NAME/.claude`. That

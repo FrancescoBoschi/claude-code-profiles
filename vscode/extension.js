@@ -63,7 +63,7 @@ function tilde(p) {
 function describe(info) {
   if (!info.profile) return 'no profile';
   if (!info.exists) return `${info.profile} (missing profile)`;
-  return info.kind === 'vertex' ? `${info.profile} · vertex ${info.vertexProject || ''}`.trim() : `${info.profile} · ${info.kind}`;
+  return `${info.profile} · ${[info.auth || info.kind, info.vertexProject, info.tag].filter(Boolean).join(' · ')}`;
 }
 
 async function pickFolder(placeHolder) {
@@ -83,7 +83,7 @@ async function pickProfile(placeHolder, current, allowNew) {
   const list = await runJson(['list', '--json']);
   const items = list.profiles.map(p => ({
     label: (p.name === current ? '$(check) ' : '') + p.name,
-    description: p.kind === 'vertex' ? `vertex · ${p.vertexProject || ''}` : p.kind,
+    description: [p.auth || p.kind, p.vertexProject, p.tag].filter(Boolean).join(' · '),
     detail: tilde(p.configDir),
     profile: p.name,
   }));
@@ -128,7 +128,8 @@ async function refresh() {
     status.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   } else {
     status.text = `$(account) ccprof: ${main.profile}` + (main.kind === 'vertex' && main.vertexProject ? ` · ${main.vertexProject}` : '');
-    status.backgroundColor = main.kind === 'personal' && highlight
+    const personal = main.tag ? main.tag === 'personal' : main.kind === 'personal';
+    status.backgroundColor = personal && highlight
       ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
   }
   if (mixed || main.conflictingSettings.length) status.text += ' $(warning)';

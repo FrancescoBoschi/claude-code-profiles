@@ -11,9 +11,12 @@ ccprof $CCPROF_VERSION — one Claude Code account per project
 Usage: ccprof <command> [arguments]
 
 Profiles (create as many as you need, with any name you like)
-  add <name> [--type team|personal|vertex] [--project ID] [--region R] [--gcloud-config NAME]
+  add <name> [--auth subscription|vertex|bedrock|api-key] [--tag work|personal] [options]
                         create a profile (asks for anything missing)
-  login <name>          first login for a profile (OAuth, or gcloud credentials for vertex)
+                        vertex:  --project ID [--region R] [--gcloud-config NAME]
+                        bedrock: --region R [--aws-profile NAME]
+  login <name>          log in (subscription), refresh cloud credentials (vertex, bedrock)
+                        or replace the stored key (api-key)
   rename <old> <new>    rename a profile and update its bindings
   edit <name>           open the profile file in \$EDITOR
   remove <name>         delete the profile and its bindings
@@ -23,6 +26,8 @@ Projects
   unbind [dir]          remove the binding
   which [dir] [--json]  show which profile would be used here, and why
   current [dir]         print just the profile name (for prompts and scripts)
+  import [dir] [--from DIR]
+                        copy this project's older conversations (default: from ~/.claude)
 
 Other
   list [--json]         profiles and bound projects
@@ -32,10 +37,12 @@ Other
   version
 
 Examples
-  ccprof add work     --type team
-  ccprof add personal --type personal
-  ccprof add side     --type personal
-  ccprof add gcp-prod --type vertex --project my-billing-project
+  ccprof add work     --auth subscription --tag work
+  ccprof add personal --auth subscription --tag personal
+  ccprof add side     --auth subscription --tag personal
+  ccprof add gcp-prod --auth vertex  --project my-billing-project
+  ccprof add aws-dev  --auth bedrock --region us-east-1 --aws-profile dev
+  ccprof add console  --auth api-key --tag personal
   cd ~/code/app && ccprof bind work
 
 Once a project is bound, just run "claude" as usual.
@@ -63,32 +70,57 @@ jstr() {
 }
 
 cmd_add() {
-  local name="${1:-}" type="" project="" region="" gcfg=""
-  [ -n "$name" ] || ccprof_die "usage: ccprof add <name> [--type team|personal|vertex] ..."
+  local name="${1:-}" auth="" tag="" type="" project="" region="" gcfg="" awsprof="" key=""
+  [ -n "$name" ] || ccprof_die "usage: ccprof add <name> [--auth subscription|vertex|bedrock|api-key] [--tag work|personal] ..."
   shift
   ccprof_valid_name "$name" || ccprof_die "invalid name: use letters, digits, '-' and '_'"
   ccprof_profile_exists "$name" && ccprof_die "profile '$name' already exists (edit it with: ccprof edit $name)"
   while [ $# -gt 0 ]; do
     [ $# -ge 2 ] || ccprof_die "missing value for $1"
     case "$1" in
-      --type) type="$2" ;;
+      --auth) auth="$2" ;;
+      --tag) tag="$2" ;;
+      --type) type="$2" ;;   # 0.4.x and earlier: team | personal | vertex
       --project) project="$2" ;;
       --region) region="$2" ;;
       --gcloud-config) gcfg="$2" ;;
+      --aws-profile) awsprof="$2" ;;
       *) ccprof_die "unknown option: $1" ;;
     esac
     shift 2
   done
 
-  [ -n "$type" ] || type="$(ask "Type (team / personal / vertex)" "")"
-  case "$type" in team|personal|vertex) ;; *) ccprof_die "invalid type: '$type' (use team, personal or vertex)" ;; esac
+  case "$type" in
+    '') ;;
+    team) auth="${auth:-subscription}"; tag="${tag:-work}" ;;
+    personal) auth="${auth:-subscription}"; tag="${tag:-personal}" ;;
+    vertex) auth="${auth:-vertex}" ;;
+    *) ccprof_die "invalid type: '$type' (use --auth and --tag instead)" ;;
+  esac
+  [ -n "$auth" ] || auth="$(ask "Authentication (subscription / vertex / bedrock / api-key)" "subscription")"
+  case "$auth" in subscription|vertex|bedrock|api-key) ;; *) ccprof_die "invalid auth: '$auth' (use subscription, vertex, bedrock or api-key)" ;; esac
+  [ -n "$tag" ] || tag="$(ask "Tag (work / personal)" "work")"
+  case "$tag" in work|personal) ;; *) ccprof_die "invalid tag: '$tag' (use work or personal)" ;; esac
 
-  if [ "$type" = vertex ]; then
-    [ -n "$project" ] || project="$(ask "GCP project for billing" "")"
-    [ -n "$project" ] || ccprof_die "a vertex profile needs --project"
-    [ -n "$region" ] || region="$(ask "Vertex region (CLOUD_ML_REGION)" "global")"
-    [ -n "$gcfg" ] || gcfg="$(ask "gcloud configuration to use (empty = the active one)" "")"
-  fi
+  case "$auth" in
+    vertex)
+      [ -n "$project" ] || project="$(ask "GCP project for billing" "")"
+      [ -n "$project" ] || ccprof_die "a vertex profile needs --project"
+      [ -n "$region" ] || region="$(ask "Vertex region (CLOUD_ML_REGION)" "global")"
+      [ -n "$gcfg" ] || gcfg="$(ask "gcloud configuration to use (empty = the active one)" "")" ;;
+    bedrock)
+      [ -n "$region" ] || region="$(ask "AWS region for Bedrock" "us-east-1")"
+      [ -n "$region" ] || ccprof_die "a bedrock profile needs --region"
+      [ -n "$awsprof" ] || awsprof="$(ask "AWS profile (empty = default credentials)" "")" ;;
+    api-key)
+      if [ -t 0 ]; then
+        printf 'Anthropic API key (input hidden): ' >&2; read -rs key || true; echo >&2
+      else
+        read -r key || true
+      fi
+      [ -n "$key" ] || ccprof_die "no API key given"
+      ccprof_secret_set "$name" "$key" ;;
+  esac
 
   local dir="$CCPROF_ACCOUNTS_DIR/$name" f
   f="$(ccprof_profile_file "$name")"
@@ -96,50 +128,82 @@ cmd_add() {
   chmod 700 "$CCPROF_HOME" "$CCPROF_PROFILES_DIR" "$dir" 2>/dev/null || true
   {
     echo "# ccprof profile: $name"
-    printf 'CCPROF_KIND=%q\n' "$type"
+    printf 'CCPROF_AUTH=%q\n' "$auth"
+    printf 'CCPROF_TAG=%q\n' "$tag"
     printf 'CLAUDE_CONFIG_DIR=%q\n' "$dir"
-    if [ "$type" = vertex ]; then
-      echo "CLAUDE_CODE_USE_VERTEX=1"
-      printf 'CLOUD_ML_REGION=%q\n' "$region"
-      printf 'ANTHROPIC_VERTEX_PROJECT_ID=%q\n' "$project"
-      [ -z "$gcfg" ] || printf 'CLOUDSDK_ACTIVE_CONFIG_NAME=%q\n' "$gcfg"
-    fi
+    case "$auth" in
+      vertex)
+        echo "CLAUDE_CODE_USE_VERTEX=1"
+        printf 'CLOUD_ML_REGION=%q\n' "$region"
+        printf 'ANTHROPIC_VERTEX_PROJECT_ID=%q\n' "$project"
+        [ -z "$gcfg" ] || printf 'CLOUDSDK_ACTIVE_CONFIG_NAME=%q\n' "$gcfg" ;;
+      bedrock)
+        echo "CLAUDE_CODE_USE_BEDROCK=1"
+        printf 'AWS_REGION=%q\n' "$region"
+        [ -z "$awsprof" ] || printf 'AWS_PROFILE=%q\n' "$awsprof" ;;
+    esac
   } > "$f"
   chmod 600 "$f"
 
-  # Claude Code statusline showing the active profile (only if none exists yet).
+  # Claude Code settings for this profile (only if none exist yet): the statusline shows
+  # the active profile; api-key profiles read their key from the keychain via apiKeyHelper.
   if [ ! -f "$dir/settings.json" ]; then
-    cat > "$dir/settings.json" <<EOF
-{
-  "statusLine": {
-    "type": "command",
-    "command": "\"$CCPROF_ROOT/bin/ccprof\" statusline"
-  }
-}
-EOF
+    {
+      echo "{"
+      if [ "$auth" = api-key ]; then
+        printf '  "apiKeyHelper": "\\"%s/bin/ccprof\\" api-key %s",\n' "$CCPROF_ROOT" "$name"
+      fi
+      echo '  "statusLine": {'
+      echo '    "type": "command",'
+      printf '    "command": "\\"%s/bin/ccprof\\" statusline"\n' "$CCPROF_ROOT"
+      echo "  }"
+      echo "}"
+    } > "$dir/settings.json"
+  elif [ "$auth" = api-key ]; then
+    ccprof_warn "$(ccprof_tilde "$dir/settings.json") already exists: add \"apiKeyHelper\": \"$CCPROF_ROOT/bin/ccprof api-key $name\" to it"
   fi
 
-  echo "✓ profile '$name' ($type) created"
+  echo "✓ profile '$name' ($auth, $tag) created"
   echo "  config dir: $(ccprof_tilde "$dir")"
   echo "  next steps:"
-  echo "    ccprof login $name"
+  case "$auth" in
+    api-key) echo "    (no login needed: the key is stored in your keychain)" ;;
+    *) echo "    ccprof login $name" ;;
+  esac
   echo "    cd <project> && ccprof bind $name"
 }
 
 cmd_login() {
   need_profile "${1:-}"
-  local name="$1" kind real
-  kind="$(ccprof_profile_get "$name" CCPROF_KIND)"
-  if [ "$kind" = vertex ]; then
-    command -v gcloud >/dev/null || ccprof_die "gcloud not found: install the Google Cloud SDK"
-    ( ccprof_load_profile "$name"; gcloud auth application-default login )
-    echo "✓ ADC credentials refreshed for '$name'"
-  else
-    real="$(ccprof_real_claude)" || ccprof_die "real 'claude' binary not found on PATH"
-    echo "Starting Claude Code with profile '$name'."
-    echo "If the login screen does not appear, type /login. Type /exit when you are done."
-    ( ccprof_load_profile "$name"; exec "$real" )
-  fi
+  local name="$1" auth real key="" awsprof
+  auth="$(ccprof_profile_get "$name" CCPROF_AUTH)"
+  case "$auth" in
+    vertex)
+      command -v gcloud >/dev/null || ccprof_die "gcloud not found: install the Google Cloud SDK"
+      ( ccprof_load_profile "$name"; gcloud auth application-default login )
+      echo "✓ ADC credentials refreshed for '$name'" ;;
+    bedrock)
+      awsprof="$(ccprof_profile_get "$name" AWS_PROFILE)"
+      if command -v aws >/dev/null && [ -n "$awsprof" ]; then
+        ( ccprof_load_profile "$name"; aws sso login --profile "$awsprof" )
+      else
+        echo "Bedrock uses your AWS credentials: configure them with 'aws configure' or 'aws sso login'${awsprof:+ for profile $awsprof}."
+      fi ;;
+    api-key)
+      if [ -t 0 ]; then
+        printf 'New Anthropic API key for %s (input hidden): ' "$name" >&2; read -rs key || true; echo >&2
+      else
+        read -r key || true
+      fi
+      [ -n "$key" ] || ccprof_die "no API key given"
+      ccprof_secret_set "$name" "$key"
+      echo "✓ API key for '$name' stored in your keychain" ;;
+    *)
+      real="$(ccprof_real_claude)" || ccprof_die "real 'claude' binary not found on PATH"
+      echo "Starting Claude Code with profile '$name'."
+      echo "If the login screen does not appear, type /login. Type /exit when you are done."
+      ( ccprof_load_profile "$name"; exec "$real" ) ;;
+  esac
 }
 
 cmd_rename() {
@@ -156,6 +220,14 @@ cmd_rename() {
     O="$old" N="$new" awk -F'\t' -v OFS='\t' '!/^#/ && $2 == ENVIRON["O"] { $2 = ENVIRON["N"] } 1' \
       "$CCPROF_PROJECTS_FILE" > "$CCPROF_PROJECTS_FILE.tmp.$$"
     mv "$CCPROF_PROJECTS_FILE.tmp.$$" "$CCPROF_PROJECTS_FILE"
+  fi
+  if [ "$(ccprof_profile_get "$new" CCPROF_AUTH)" = api-key ]; then
+    local key cfgs
+    if key="$(ccprof_secret_get "$old")"; then ccprof_secret_set "$new" "$key"; ccprof_secret_delete "$old"; fi
+    cfgs="$(ccprof_profile_get "$new" CLAUDE_CONFIG_DIR)/settings.json"
+    if [ -f "$cfgs" ]; then
+      sed "s/ api-key $old\"/ api-key $new\"/" "$cfgs" > "$cfgs.tmp.$$" && mv "$cfgs.tmp.$$" "$cfgs"
+    fi
   fi
   echo "✓ profile '$old' renamed to '$new' (bindings updated)"
   echo "  config dir unchanged, so logins and conversations are kept: $(ccprof_tilde "$(ccprof_profile_get "$new" CLAUDE_CONFIG_DIR)")"
@@ -192,7 +264,7 @@ cmd_unbind() {
 }
 
 cmd_which() {
-  local a json=0 arg="" dir match="" prof via="" src="" bound="" kind="" cfg="" proj="" region="" root sf exists=1
+  local a json=0 arg="" dir match="" prof via="" src="" bound="" kind="" auth="" tag="" cfg="" proj="" region="" root sf exists=1
   local warns=""
   for a in ${1+"$@"}; do
     case "$a" in --json) json=1 ;; *) arg="$a" ;; esac
@@ -205,11 +277,16 @@ cmd_which() {
     prof="${match%%"$CCPROF_TAB"*}"
     if [ -n "$prof" ]; then src=bind; bound="${match#*"$CCPROF_TAB"}"; via="bound at $(ccprof_tilde "$bound")"; fi
   fi
+  local awsp=""
   if [ -n "$prof" ] && ccprof_profile_exists "$prof"; then
+    awsp="$(ccprof_profile_get "$prof" AWS_PROFILE)"
     kind="$(ccprof_profile_get "$prof" CCPROF_KIND)"
+    auth="$(ccprof_profile_get "$prof" CCPROF_AUTH)"
+    tag="$(ccprof_profile_get "$prof" CCPROF_TAG)"
     cfg="$(ccprof_profile_get "$prof" CLAUDE_CONFIG_DIR)"
     proj="$(ccprof_profile_get "$prof" ANTHROPIC_VERTEX_PROJECT_ID)"
-    region="$(ccprof_profile_get "$prof" CLOUD_ML_REGION)"
+    if [ "$auth" = bedrock ]; then region="$(ccprof_profile_get "$prof" AWS_REGION)"
+    else region="$(ccprof_profile_get "$prof" CLOUD_ML_REGION)"; fi
   elif [ -n "$prof" ]; then
     exists=0
   fi
@@ -217,17 +294,21 @@ cmd_which() {
   # Repository settings that could override the profile.
   root="$( (cd "$dir" && git rev-parse --show-toplevel 2>/dev/null) || true)"
   [ -n "$root" ] || root="$dir"
-  for sf in "$root/.claude/settings.json" "$root/.claude/settings.local.json"; do
-    [ -f "$sf" ] || continue
-    if grep -Eq '"(CLAUDE_CONFIG_DIR|CLAUDE_CODE_USE_[A-Z]+|ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|VERTEX_PROJECT_ID)|CLOUD_ML_REGION|GOOGLE_CLOUD_PROJECT)"' "$sf"; then
-      warns="$warns$sf"$'\n'
-    fi
+  local d seen=""
+  for d in "$dir" "$root"; do
+    [ "$d" != "$seen" ] || continue; seen="$d"
+    for sf in "$d/.claude/settings.json" "$d/.claude/settings.local.json"; do
+      [ -f "$sf" ] || continue
+      if grep -Eq '"(CLAUDE_CONFIG_DIR|CLAUDE_CODE_USE_[A-Z]+|ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|VERTEX_PROJECT_ID)|CLOUD_ML_REGION|GOOGLE_CLOUD_PROJECT)"' "$sf"; then
+        warns="$warns$sf"$'\n'
+      fi
+    done
   done
 
   if [ $json = 1 ]; then
-    printf '{"dir":%s,"profile":%s,"exists":%s,"source":%s,"boundPath":%s,"kind":%s,"configDir":%s,"vertexProject":%s,"region":%s,"conflictingSettings":[' \
+    printf '{"dir":%s,"profile":%s,"exists":%s,"source":%s,"boundPath":%s,"kind":%s,"auth":%s,"tag":%s,"configDir":%s,"vertexProject":%s,"region":%s,"conflictingSettings":[' \
       "$(jstr "$dir")" "$(jstr "$prof")" "$([ $exists = 1 ] && echo true || echo false)" "$(jstr "$src")" \
-      "$(jstr "$bound")" "$(jstr "$kind")" "$(jstr "$cfg")" "$(jstr "$proj")" "$(jstr "$region")"
+      "$(jstr "$bound")" "$(jstr "$kind")" "$(jstr "$auth")" "$(jstr "$tag")" "$(jstr "$cfg")" "$(jstr "$proj")" "$(jstr "$region")"
     local first=1 w
     while IFS= read -r w; do
       [ -n "$w" ] || continue
@@ -249,9 +330,10 @@ EOF
     echo "Profile:     $prof — WARNING: this profile does not exist"
     return 1
   fi
-  echo "Profile:     $prof ($kind), $via"
+  echo "Profile:     $prof ($auth, $tag), $via"
   echo "Config dir:  $(ccprof_tilde "$cfg")"
-  [ "$kind" != vertex ] || echo "GCP project: $proj  region: $region"
+  [ "$auth" != vertex ] || echo "GCP project: $proj  region: $region"
+  [ "$auth" != bedrock ] || echo "AWS region:  $region${awsp:+  profile: $awsp}"
   while IFS= read -r w; do
     [ -n "$w" ] && echo "WARNING: $(ccprof_tilde "$w") sets account/provider variables that can override the profile"
   done <<EOF
@@ -278,8 +360,9 @@ cmd_list_json() {
   printf '{"version":%s,"shim":%s,"home":%s,"profiles":[' "$(jstr "$CCPROF_VERSION")" "$(jstr "$CCPROF_ROOT/shims/claude")" "$(jstr "$CCPROF_HOME")"
   for n in $(ccprof_profile_names); do
     [ $first = 1 ] || printf ','; first=0
-    printf '{"name":%s,"kind":%s,"configDir":%s,"vertexProject":%s}' "$(jstr "$n")" \
-      "$(jstr "$(ccprof_profile_get "$n" CCPROF_KIND)")" "$(jstr "$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)")" \
+    printf '{"name":%s,"kind":%s,"auth":%s,"tag":%s,"configDir":%s,"vertexProject":%s}' "$(jstr "$n")" \
+      "$(jstr "$(ccprof_profile_get "$n" CCPROF_KIND)")" "$(jstr "$(ccprof_profile_get "$n" CCPROF_AUTH)")" \
+      "$(jstr "$(ccprof_profile_get "$n" CCPROF_TAG)")" "$(jstr "$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)")" \
       "$(jstr "$(ccprof_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)")"
   done
   printf '],"bindings":['
@@ -297,15 +380,18 @@ cmd_list_json() {
 
 cmd_list() {
   if [ "${1:-}" = --json ]; then cmd_list_json; return; fi
-  local n kind dir extra p prof
+  local n auth tag dir extra p prof
   echo "Profiles:"
   if [ -z "$(ccprof_profile_names)" ]; then echo "  (none — create the first one with: ccprof add <name>)"; fi
   for n in $(ccprof_profile_names); do
-    kind="$(ccprof_profile_get "$n" CCPROF_KIND)"
+    auth="$(ccprof_profile_get "$n" CCPROF_AUTH)"; tag="$(ccprof_profile_get "$n" CCPROF_TAG)"
     dir="$(ccprof_tilde "$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)")"
-    extra=""
-    [ "$kind" != vertex ] || extra="project: $(ccprof_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)"
-    printf '  %-14s %-9s %s  %s\n' "$n" "$kind" "$dir" "$extra"
+    case "$auth" in
+      vertex) extra="project: $(ccprof_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)" ;;
+      bedrock) extra="region: $(ccprof_profile_get "$n" AWS_REGION)" ;;
+      *) extra="" ;;
+    esac
+    printf '  %-14s %-12s %-8s %s  %s\n' "$n" "$auth" "$tag" "$dir" "$extra"
   done
   echo "Projects:"
   if [ ! -s "$CCPROF_PROJECTS_FILE" ] || ! grep -qv '^#' "$CCPROF_PROJECTS_FILE"; then
@@ -327,9 +413,52 @@ cmd_run() {
 cmd_statusline() {
   [ -t 0 ] || cat >/dev/null   # Claude Code sends JSON on stdin: not needed
   local out="ccprof: ${CCPROF_PROFILE:-?}"
-  [ "${CCPROF_KIND:-}" != vertex ] || out="$out · vertex ${ANTHROPIC_VERTEX_PROJECT_ID:-}"
-  [ "${CCPROF_KIND:-}" != personal ] || out="$out · PERSONAL"
+  case "${CCPROF_AUTH:-}" in
+    vertex) out="$out · vertex ${ANTHROPIC_VERTEX_PROJECT_ID:-}" ;;
+    bedrock) out="$out · bedrock ${AWS_REGION:-}" ;;
+    api-key) out="$out · api key" ;;
+  esac
+  [ "${CCPROF_TAG:-}" != personal ] || out="$out · PERSONAL"
   printf '%s\n' "$out"
+}
+
+cmd_api_key() { # used by Claude Code's apiKeyHelper
+  [ -n "${1:-}" ] || ccprof_die "usage: ccprof api-key <profile>"
+  ccprof_secret_get "$1" || ccprof_die "no API key stored for '$1' (store one with: ccprof login $1)"
+}
+
+cmd_import() {
+  local a dir="" from="$HOME/.claude" prof match cfg enc src dst f n=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) [ $# -ge 2 ] || ccprof_die "missing value for --from"; from="$2"; shift 2 ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  dir="$(ccprof_realdir "${dir:-.}")"; [ -n "$dir" ] || ccprof_die "no such directory"
+  if [ -n "${CCPROF_OVERRIDE:-}" ]; then prof="$CCPROF_OVERRIDE"; else
+    match="$(ccprof_resolve "$dir")"; prof="${match%%"$CCPROF_TAB"*}"
+  fi
+  [ -n "$prof" ] || ccprof_die "no profile bound to $(ccprof_tilde "$dir"): run ccprof bind <profile> first"
+  need_profile "$prof"
+  cfg="$(ccprof_profile_get "$prof" CLAUDE_CONFIG_DIR)"
+  if [ "$(ccprof_realdir "$cfg")" = "$(ccprof_realdir "$from")" ]; then
+    ccprof_die "profile '$prof' already uses $(ccprof_tilde "$from"): nothing to import"
+  fi
+  enc="$(printf '%s' "$dir" | sed 's/[^A-Za-z0-9]/-/g')"
+  src="$from/projects/$enc"
+  [ -d "$src" ] || ccprof_die "no conversations for $(ccprof_tilde "$dir") in $(ccprof_tilde "$from/projects")"
+  dst="$cfg/projects/$enc"
+  mkdir -p "$dst"
+  for f in "$src"/* "$src"/.[!.]*; do
+    [ -e "$f" ] || continue
+    [ -e "$dst/${f##*/}" ] && continue
+    cp -R "$f" "$dst/"; n=$((n+1))
+  done
+  echo "✓ copied $n item(s) into profile '$prof' (existing ones kept, originals untouched)"
+  echo "  from: $(ccprof_tilde "$src")"
+  echo "  to:   $(ccprof_tilde "$dst")"
+  echo "  tip: close running claude sessions of this project before importing; use claude --resume to pick one"
 }
 
 cmd_doctor() {
@@ -346,11 +475,11 @@ cmd_doctor() {
     echo "✗ real claude not found on PATH"; ok=1
   fi
   for v in $CCPROF_MANAGED_VARS; do
-    case "$v" in CCPROF_*) continue ;; esac
+    case "$v" in CCPROF_*|CCM_*) continue ;; esac
     if [ -n "${!v:-}" ]; then echo "! $v is set in your shell: the shim ignores it, but check that nothing else relies on it"; fi
   done
   for n in $(ccprof_profile_names); do
-    kind="$(ccprof_profile_get "$n" CCPROF_KIND)"; dir="$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)"
+    kind="$(ccprof_profile_get "$n" CCPROF_AUTH)"; dir="$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)"
     if [ ! -d "$dir" ]; then echo "✗ [$n] missing config dir: $(ccprof_tilde "$dir")"; ok=1; continue; fi
     if [ "$kind" = vertex ]; then
       cfg="$(ccprof_profile_get "$n" CLOUDSDK_ACTIVE_CONFIG_NAME)"
@@ -358,6 +487,13 @@ cmd_doctor() {
       elif CLOUDSDK_ACTIVE_CONFIG_NAME="${cfg:-${CLOUDSDK_ACTIVE_CONFIG_NAME:-}}" gcloud auth application-default print-access-token >/dev/null 2>&1; then
         echo "✓ [$n] ADC credentials are valid"
       else echo "✗ [$n] ADC credentials missing or expired: ccprof login $n"; ok=1; fi
+    elif [ "$kind" = bedrock ]; then
+      if ! command -v aws >/dev/null; then echo "? [$n] aws CLI not installed: cannot check the AWS credentials"
+      elif ( ccprof_load_profile "$n"; aws sts get-caller-identity >/dev/null 2>&1 ); then echo "✓ [$n] AWS credentials are valid"
+      else echo "✗ [$n] AWS credentials missing or expired: ccprof login $n"; ok=1; fi
+    elif [ "$kind" = api-key ]; then
+      if ccprof_secret_get "$n" >/dev/null; then echo "✓ [$n] API key found in the keychain"
+      else echo "✗ [$n] no API key in the keychain: ccprof login $n"; ok=1; fi
     elif [ -f "$dir/.credentials.json" ] || grep -qs '"oauthAccount"' "$dir/.claude.json"; then
       echo "✓ [$n] login found"
     else
@@ -380,11 +516,11 @@ export PATH="$CCPROF_ROOT/shims:$CCPROF_ROOT/bin:\$PATH"
 _ccprof_complete() {
   local cur="\${COMP_WORDS[COMP_CWORD]}" prev="\${COMP_WORDS[1]:-}"
   if [ "\$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=(\$(compgen -W "add login rename edit remove bind unbind which current list run doctor init version help" -- "\$cur"))
+    COMPREPLY=(\$(compgen -W "add login rename edit remove bind unbind which current import list run doctor init version help" -- "\$cur"))
   elif [ "\$COMP_CWORD" -eq 2 ]; then
     case "\$prev" in
       login|rename|edit|remove|bind|run) COMPREPLY=(\$(compgen -W "\$(ls "$CCPROF_PROFILES_DIR" 2>/dev/null | sed 's/\\.env\$//')" -- "\$cur")) ;;
-      unbind|which|current) COMPREPLY=(\$(compgen -d -- "\$cur")) ;;
+      unbind|which|current|import) COMPREPLY=(\$(compgen -d -- "\$cur")) ;;
     esac
   fi
 }
@@ -401,6 +537,7 @@ cmd_edit() { need_profile "${1:-}"; "${EDITOR:-vi}" "$(ccprof_profile_file "$1")
 cmd_remove() {
   need_profile "${1:-}"
   local dir; dir="$(ccprof_profile_get "$1" CLAUDE_CONFIG_DIR)"
+  [ "$(ccprof_profile_get "$1" CCPROF_AUTH)" != api-key ] || ccprof_secret_delete "$1"
   rm -f "$(ccprof_profile_file "$1")"
   if [ -f "$CCPROF_PROJECTS_FILE" ]; then
     P="$1" awk -F'\t' '$2 != ENVIRON["P"]' "$CCPROF_PROJECTS_FILE" > "$CCPROF_PROJECTS_FILE.tmp.$$"
@@ -421,6 +558,8 @@ case "$cmd" in
   unbind) cmd_unbind ${1+"$@"} ;;
   which) cmd_which ${1+"$@"} ;;
   current) cmd_current ${1+"$@"} ;;
+  import) cmd_import ${1+"$@"} ;;
+  api-key) cmd_api_key ${1+"$@"} ;;
   list|ls) cmd_list ${1+"$@"} ;;
   run) cmd_run ${1+"$@"} ;;
   doctor) cmd_doctor ;;

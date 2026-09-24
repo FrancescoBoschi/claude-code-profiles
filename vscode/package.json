@@ -1,8 +1,8 @@
 {
   "name": "ccprof-vscode",
   "displayName": "ccprof — Claude Code Profiles",
-  "description": "See and switch the Claude Code profile (Team, personal, Vertex AI) of each workspace, powered by the ccprof CLI. Unofficial.",
-  "version": "0.4.0",
+  "description": "See and switch the Claude Code profile (Team, personal, Vertex AI, Bedrock, API key) of each workspace, powered by the ccprof CLI. Unofficial.",
+  "version": "0.5.0",
   "publisher": "francescoboschi",
   "license": "MIT",
   "repository": {

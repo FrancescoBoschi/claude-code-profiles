@@ -6,6 +6,9 @@ set -uo pipefail
 SRC="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"; T="$(cd "$T" && pwd -P)"
 trap 'rm -rf "$T"' EXIT
+exec </dev/null                                     # never wait for interactive prompts
+unset GIT_DIR GIT_WORK_TREE
+GIT_CEILING_DIRECTORIES="$(dirname "$T")"; export GIT_CEILING_DIRECTORIES   # ignore any git repository around $T
 export HOME="$T/home"; mkdir -p "$HOME" "$T/fakebin"
 unset XDG_CONFIG_HOME CCPROF_HOME CCPROF_OVERRIDE CCPROF_BYPASS CCPROF_REAL_CLAUDE CCM_HOME CCM_OVERRIDE CCM_BYPASS CCM_REAL_CLAUDE
 touch "$HOME/.bashrc"
@@ -18,10 +21,36 @@ echo "VERTEX=${CLAUDE_CODE_USE_VERTEX:-}"
 echo "PROJECT=${ANTHROPIC_VERTEX_PROJECT_ID:-}"
 echo "GCP=${GOOGLE_CLOUD_PROJECT:-}"
 echo "KEY=${ANTHROPIC_API_KEY:-}"
+echo "GAC=${GOOGLE_APPLICATION_CREDENTIALS:-}"
+echo "BEDROCK=${CLAUDE_CODE_USE_BEDROCK:-}"
+echo "AWSP=${AWS_PROFILE:-}"
+echo "AWSR=${AWS_REGION:-}"
+echo "AWSKEY=${AWS_ACCESS_KEY_ID:-}"
 echo "PROFILE=${CCPROF_PROFILE:-}"
 echo "ARGS=$*"
 EOF
 chmod +x "$T/fakebin/claude"
+
+# Fake macOS "security" keychain, backed by files in $T/keychain
+mkdir -p "$T/keychain"
+cat > "$T/fakebin/security" <<EOF
+#!/usr/bin/env bash
+cmd=\$1; shift; acct=""; val=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    -a) acct=\$2; shift 2 ;;
+    -w) if [ \$# -ge 2 ]; then val=\$2; shift 2; else shift; fi ;;
+    -s|-l) shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "\$cmd" in
+  add-generic-password) printf '%s' "\$val" > "$T/keychain/\$acct" ;;
+  find-generic-password) cat "$T/keychain/\$acct" 2>/dev/null || exit 44 ;;
+  delete-generic-password) rm "$T/keychain/\$acct" 2>/dev/null || exit 44 ;;
+esac
+EOF
+chmod +x "$T/fakebin/security"
 
 bash "$SRC/install.sh" >/dev/null || { echo "install failed"; exit 1; }
 D="$HOME/.local/share/ccprof"
@@ -97,7 +126,7 @@ out="$(cd "$T/work/core" && ccprof which)"
 check "which flags conflicting repo settings" '[[ "$out" == *WARNING* ]]'
 ccprof bind personal "$T/work/core" >/dev/null
 check "rebind replaces (single line)" '[ "$(grep -c "$T/work/core" "$HOME/.config/ccprof/projects")" -eq 1 ]'
-check "vertex statusline" '[[ "$(CCPROF_PROFILE=v CCPROF_KIND=vertex ANTHROPIC_VERTEX_PROJECT_ID=p ccprof statusline </dev/null)" == *"vertex p"* ]]'
+check "vertex statusline" '[[ "$(CCPROF_PROFILE=v CCPROF_AUTH=vertex ANTHROPIC_VERTEX_PROJECT_ID=p ccprof statusline </dev/null)" == *"vertex p"* ]]'
 check "settings.json with statusLine created" 'grep -q statusLine "$HOME/.claude-accounts/work/settings.json"'
 check "profile file has mode 600" '[ "$(stat -c %a "$HOME/.config/ccprof/profiles/work.env" 2>/dev/null || stat -f %Lp "$HOME/.config/ccprof/profiles/work.env")" = 600 ]'
 
@@ -124,6 +153,47 @@ fi
 check "rc block present only once after reinstall" 'bash "$SRC/install.sh" >/dev/null && [ "$(grep -c ">>> ccprof >>>" "$HOME/.bashrc")" -eq 1 ]'
 
 echo
+echo "Authentication types and tags (0.5.0)"
+mkdir -p "$T/aws/app" "$T/keyproj" "$T/legacy"
+ccprof add aws --auth bedrock --region eu-west-1 --aws-profile dev >/dev/null
+ccprof bind aws "$T/aws" >/dev/null
+out="$(cd "$T/aws/app" && AWS_PROFILE=other AWS_ACCESS_KEY_ID=AKIAOLD claude)"
+check "bedrock: provider enabled with its region" 'line "$out" BEDROCK=1 && line "$out" AWSR=eu-west-1'
+check "bedrock: the profile's AWS profile wins" 'line "$out" AWSP=dev'
+check "bedrock: stray AWS keys cleared" 'line "$out" AWSKEY='
+out="$(cd "$T/work/app" && AWS_PROFILE=other GOOGLE_APPLICATION_CREDENTIALS=/creds.json claude)"
+check "subscription profile keeps cloud credentials for tools" 'line "$out" AWSP=other && line "$out" GAC=/creds.json && line "$out" BEDROCK='
+out="$(cd "$T/work/app/special" && GOOGLE_APPLICATION_CREDENTIALS=/creds.json claude)"
+check "vertex profile still clears GCP credentials" 'line "$out" GAC='
+printf 'sk-ant-test-123\n' | ccprof add console --auth api-key --tag personal >/dev/null
+ccprof bind console "$T/keyproj" >/dev/null
+check "api-key: key stored in the keychain, not in the profile" '[ "$(cat "$T/keychain/console")" = sk-ant-test-123 ] && ! grep -q sk-ant "$HOME/.config/ccprof/profiles/console.env"'
+check "api-key: apiKeyHelper configured" 'grep -q "api-key console" "$HOME/.claude-accounts/console/settings.json"'
+check "api-key: helper prints the key" '[ "$(ccprof api-key console)" = sk-ant-test-123 ]'
+out="$(cd "$T/keyproj" && ANTHROPIC_API_KEY=sk-other claude)"
+check "api-key: stray ANTHROPIC_API_KEY cleared" 'line "$out" KEY= && line "$out" PROFILE=console'
+check "api-key: personal tag in statusline" '[[ "$(cd "$T/keyproj" && CCPROF_PROFILE=console CCPROF_AUTH=api-key CCPROF_TAG=personal ccprof statusline </dev/null)" == *"api key · PERSONAL"* ]]'
+ccprof rename console console2 >/dev/null
+check "api-key: rename moves the key and the helper" '[ -f "$T/keychain/console2" ] && [ ! -f "$T/keychain/console" ] && grep -qF "api-key console2\"" "$HOME/.claude-accounts/console/settings.json"'
+ccprof remove console2 >/dev/null
+check "api-key: remove deletes the key" '[ ! -f "$T/keychain/console2" ]'
+printf '# ccprof profile: legacy\nCCPROF_KIND=personal\nCLAUDE_CONFIG_DIR=%s\n' "$HOME/.claude-accounts/legacy" > "$HOME/.config/ccprof/profiles/legacy.env"
+check "0.4.x profile files still work (derived auth/tag)" 'grep -Eq "legacy +subscription +personal" <<<"$(ccprof list)"'
+check "--type is still accepted" 'ccprof add oldstyle --type team >/dev/null && grep -q "^CCPROF_AUTH=subscription" "$HOME/.config/ccprof/profiles/oldstyle.env" && grep -q "^CCPROF_TAG=work" "$HOME/.config/ccprof/profiles/oldstyle.env"'
+check "invalid auth refused" '! ccprof add bad --auth magic >/dev/null 2>&1'
+
+echo "Import of older conversations"
+enc="$(printf '%s' "$T/side/tool" | sed 's/[^A-Za-z0-9]/-/g')"
+mkdir -p "$HOME/.claude/projects/$enc"
+echo '{"old":1}' > "$HOME/.claude/projects/$enc/s1.jsonl"
+out="$(cd "$T/side/tool" && ccprof import)"
+dst="$(ccprof which --json "$T/side/tool" | sed 's/.*"configDir":"\([^"]*\)".*/\1/')/projects/$enc"
+check "import copies the conversations into the bound profile" '[ -f "$dst/s1.jsonl" ] && [ -f "$HOME/.claude/projects/$enc/s1.jsonl" ]'
+echo '{"changed":1}' > "$dst/s1.jsonl"
+(cd "$T/side/tool" && ccprof import >/dev/null)
+check "import never overwrites existing files" 'grep -q changed "$dst/s1.jsonl"'
+check "import fails cleanly without conversations" '! (cd "$T/work/app" && ccprof import >/dev/null 2>&1)'
+
 echo "Migration from ccm (<= 0.3.x)"
 check "ccm alias still works" '[[ "$(ccm version 2>/dev/null)" == ccprof* ]]'
 check "CCM_OVERRIDE still honoured" '[[ "$(cd "$T/elsewhere" && CCM_OVERRIDE=work claude)" == *"PROFILE=work"* ]]'

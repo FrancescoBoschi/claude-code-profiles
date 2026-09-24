@@ -16,4 +16,4 @@ bindings you use from the terminal. Unofficial, not affiliated with Anthropic.
   shim, so the official panel uses the workspace profile too. The extension checks this
   setting on startup and offers to fix it.
 
-Requires ccprof 0.3.0 or later. Install: `code --install-extension ccprof-vscode.vsix`
+Requires ccprof 0.5.0 or later. Install: `code --install-extension ccprof-vscode.vsix`

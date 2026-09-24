@@ -3,6 +3,25 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses [semantic versioning](https://semver.org/).
 
+## [0.5.0]
+
+### Added
+- `--auth subscription|vertex|bedrock|api-key` and `--tag work|personal`: how a profile
+  authenticates is now separate from how it is shown. `--type` still works.
+- **Amazon Bedrock** profiles (`--region`, `--aws-profile`), checked by `ccprof doctor`.
+- **API key** profiles: the key is stored in the macOS Keychain or libsecret and passed to
+  Claude Code via `apiKeyHelper`, never written to a file. `rename` and `remove` keep the
+  keychain in sync.
+- `ccprof import`: copies a project's older conversations into its profile, without
+  overwriting anything.
+- `auth` and `tag` fields in `which --json` and `list --json`.
+
+### Changed
+- Cloud credentials are cleared only where they matter: GCP variables for Vertex profiles,
+  AWS variables for Bedrock profiles. `gcloud` and `aws` run by Claude in other projects work again.
+- The VS Code extension highlights personal profiles by tag and shows the auth method.
+- Profiles created with 0.4.x and earlier keep working unchanged.
+
 ## [0.4.0]
 
 ### Changed
