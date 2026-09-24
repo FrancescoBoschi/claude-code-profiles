@@ -7,7 +7,7 @@ about: Something does not work
 
 **What you expected**
 
-**Output of `ccm doctor`** (remove project or account names if you prefer not to share them)
+**Output of `ccprof doctor`** (remove project or account names if you prefer not to share them)
 ```
 ```
 

@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# ccprof — Claude Code Profiles: one Claude Code account per project, automatically.
+set -euo pipefail
+CCPROF_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$CCPROF_ROOT/lib/ccprof-common.sh"
+
+usage() {
+  cat <<EOF
+ccprof $CCPROF_VERSION — one Claude Code account per project
+
+Usage: ccprof <command> [arguments]
+
+Profiles (create as many as you need, with any name you like)
+  add <name> [--type team|personal|vertex] [--project ID] [--region R] [--gcloud-config NAME]
+                        create a profile (asks for anything missing)
+  login <name>          first login for a profile (OAuth, or gcloud credentials for vertex)
+  rename <old> <new>    rename a profile and update its bindings
+  edit <name>           open the profile file in \$EDITOR
+  remove <name>         delete the profile and its bindings
+
+Projects
+  bind <profile> [dir]  bind a project (default: git root, or current directory)
+  unbind [dir]          remove the binding
+  which [dir] [--json]  show which profile would be used here, and why
+  current [dir]         print just the profile name (for prompts and scripts)
+
+Other
+  list [--json]         profiles and bound projects
+  run <profile> [args]  run claude with a forced profile, just this once
+  doctor                check installation, PATH, logins and bindings
+  init                  shell snippet for your rc file
+  version
+
+Examples
+  ccprof add work     --type team
+  ccprof add personal --type personal
+  ccprof add side     --type personal
+  ccprof add gcp-prod --type vertex --project my-billing-project
+  cd ~/code/app && ccprof bind work
+
+Once a project is bound, just run "claude" as usual.
+EOF
+}
+
+need_profile() {
+  [ -n "${1:-}" ] || ccprof_die "specify a profile"
+  ccprof_profile_exists "$1" || ccprof_die "profile '$1' does not exist (profiles: $(ccprof_profile_names | tr '\n' ' '))"
+}
+
+ask() { # prompt default -> prints the answer
+  local ans=""
+  if [ -t 0 ]; then
+    printf '%s%s: ' "$1" "${2:+ [$2]}" >&2
+    read -r ans || true
+  fi
+  printf '%s' "${ans:-${2:-}}"
+}
+
+# JSON string with escaping, or null when empty
+jstr() {
+  if [ -z "$1" ]; then printf 'null'; return; fi
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$(printf '\t')/\\\\t/g")"
+}
+
+cmd_add() {
+  local name="${1:-}" type="" project="" region="" gcfg=""
+  [ -n "$name" ] || ccprof_die "usage: ccprof add <name> [--type team|personal|vertex] ..."
+  shift
+  ccprof_valid_name "$name" || ccprof_die "invalid name: use letters, digits, '-' and '_'"
+  ccprof_profile_exists "$name" && ccprof_die "profile '$name' already exists (edit it with: ccprof edit $name)"
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || ccprof_die "missing value for $1"
+    case "$1" in
+      --type) type="$2" ;;
+      --project) project="$2" ;;
+      --region) region="$2" ;;
+      --gcloud-config) gcfg="$2" ;;
+      *) ccprof_die "unknown option: $1" ;;
+    esac
+    shift 2
+  done
+
+  [ -n "$type" ] || type="$(ask "Type (team / personal / vertex)" "")"
+  case "$type" in team|personal|vertex) ;; *) ccprof_die "invalid type: '$type' (use team, personal or vertex)" ;; esac
+
+  if [ "$type" = vertex ]; then
+    [ -n "$project" ] || project="$(ask "GCP project for billing" "")"
+    [ -n "$project" ] || ccprof_die "a vertex profile needs --project"
+    [ -n "$region" ] || region="$(ask "Vertex region (CLOUD_ML_REGION)" "global")"
+    [ -n "$gcfg" ] || gcfg="$(ask "gcloud configuration to use (empty = the active one)" "")"
+  fi
+
+  local dir="$CCPROF_ACCOUNTS_DIR/$name" f
+  f="$(ccprof_profile_file "$name")"
+  mkdir -p "$CCPROF_PROFILES_DIR" "$dir"
+  chmod 700 "$CCPROF_HOME" "$CCPROF_PROFILES_DIR" "$dir" 2>/dev/null || true
+  {
+    echo "# ccprof profile: $name"
+    printf 'CCPROF_KIND=%q\n' "$type"
+    printf 'CLAUDE_CONFIG_DIR=%q\n' "$dir"
+    if [ "$type" = vertex ]; then
+      echo "CLAUDE_CODE_USE_VERTEX=1"
+      printf 'CLOUD_ML_REGION=%q\n' "$region"
+      printf 'ANTHROPIC_VERTEX_PROJECT_ID=%q\n' "$project"
+      [ -z "$gcfg" ] || printf 'CLOUDSDK_ACTIVE_CONFIG_NAME=%q\n' "$gcfg"
+    fi
+  } > "$f"
+  chmod 600 "$f"
+
+  # Claude Code statusline showing the active profile (only if none exists yet).
+  if [ ! -f "$dir/settings.json" ]; then
+    cat > "$dir/settings.json" <<EOF
+{
+  "statusLine": {
+    "type": "command",
+    "command": "\"$CCPROF_ROOT/bin/ccprof\" statusline"
+  }
+}
+EOF
+  fi
+
+  echo "✓ profile '$name' ($type) created"
+  echo "  config dir: $(ccprof_tilde "$dir")"
+  echo "  next steps:"
+  echo "    ccprof login $name"
+  echo "    cd <project> && ccprof bind $name"
+}
+
+cmd_login() {
+  need_profile "${1:-}"
+  local name="$1" kind real
+  kind="$(ccprof_profile_get "$name" CCPROF_KIND)"
+  if [ "$kind" = vertex ]; then
+    command -v gcloud >/dev/null || ccprof_die "gcloud not found: install the Google Cloud SDK"
+    ( ccprof_load_profile "$name"; gcloud auth application-default login )
+    echo "✓ ADC credentials refreshed for '$name'"
+  else
+    real="$(ccprof_real_claude)" || ccprof_die "real 'claude' binary not found on PATH"
+    echo "Starting Claude Code with profile '$name'."
+    echo "If the login screen does not appear, type /login. Type /exit when you are done."
+    ( ccprof_load_profile "$name"; exec "$real" )
+  fi
+}
+
+cmd_rename() {
+  local old="${1:-}" new="${2:-}" src dst
+  if [ -z "$old" ] || [ -z "$new" ]; then ccprof_die "usage: ccprof rename <old> <new>"; fi
+  need_profile "$old"
+  ccprof_valid_name "$new" || ccprof_die "invalid name: use letters, digits, '-' and '_'"
+  ccprof_profile_exists "$new" && ccprof_die "profile '$new' already exists"
+  src="$(ccprof_profile_file "$old")"; dst="$(ccprof_profile_file "$new")"
+  sed "1s/^# ccprof profile: .*/# ccprof profile: $new/" "$src" > "$dst"
+  chmod 600 "$dst"
+  rm -f "$src"
+  if [ -f "$CCPROF_PROJECTS_FILE" ]; then
+    O="$old" N="$new" awk -F'\t' -v OFS='\t' '!/^#/ && $2 == ENVIRON["O"] { $2 = ENVIRON["N"] } 1' \
+      "$CCPROF_PROJECTS_FILE" > "$CCPROF_PROJECTS_FILE.tmp.$$"
+    mv "$CCPROF_PROJECTS_FILE.tmp.$$" "$CCPROF_PROJECTS_FILE"
+  fi
+  echo "✓ profile '$old' renamed to '$new' (bindings updated)"
+  echo "  config dir unchanged, so logins and conversations are kept: $(ccprof_tilde "$(ccprof_profile_get "$new" CLAUDE_CONFIG_DIR)")"
+}
+
+cmd_bind() {
+  need_profile "${1:-}"
+  local prof="$1" target
+  if [ -n "${2:-}" ]; then
+    target="$(ccprof_realdir "$2")"; [ -n "$target" ] || ccprof_die "no such directory: $2"
+  else
+    target="$(ccprof_default_target)"
+  fi
+  mkdir -p "$CCPROF_HOME"; touch "$CCPROF_PROJECTS_FILE"
+  ccprof_projects_remove "$target"
+  printf '%s\t%s\n' "$target" "$prof" >> "$CCPROF_PROJECTS_FILE"
+  echo "✓ $(ccprof_tilde "$target") → $prof"
+}
+
+cmd_unbind() {
+  local target
+  if [ -n "${1:-}" ]; then
+    target="$(ccprof_realdir "$1")"; [ -n "$target" ] || ccprof_die "no such directory: $1"
+  else
+    target="$(ccprof_default_target)"
+  fi
+  if [ -f "$CCPROF_PROJECTS_FILE" ] && cut -f1 "$CCPROF_PROJECTS_FILE" | grep -Fqx -- "$target"; then
+    ccprof_projects_remove "$target"
+    echo "✓ removed the binding for $(ccprof_tilde "$target")"
+  else
+    ccprof_warn "no direct binding for $(ccprof_tilde "$target") (see: ccprof which)"
+    return 1
+  fi
+}
+
+cmd_which() {
+  local a json=0 arg="" dir match="" prof via="" src="" bound="" kind="" cfg="" proj="" region="" root sf exists=1
+  local warns=""
+  for a in ${1+"$@"}; do
+    case "$a" in --json) json=1 ;; *) arg="$a" ;; esac
+  done
+  dir="$(ccprof_realdir "${arg:-.}")"; [ -n "$dir" ] || ccprof_die "no such directory: ${arg:-.}"
+  if [ -n "${CCPROF_OVERRIDE:-}" ]; then
+    prof="$CCPROF_OVERRIDE"; src=override; via="forced by CCPROF_OVERRIDE"
+  else
+    match="$(ccprof_resolve "$dir")"
+    prof="${match%%"$CCPROF_TAB"*}"
+    if [ -n "$prof" ]; then src=bind; bound="${match#*"$CCPROF_TAB"}"; via="bound at $(ccprof_tilde "$bound")"; fi
+  fi
+  if [ -n "$prof" ] && ccprof_profile_exists "$prof"; then
+    kind="$(ccprof_profile_get "$prof" CCPROF_KIND)"
+    cfg="$(ccprof_profile_get "$prof" CLAUDE_CONFIG_DIR)"
+    proj="$(ccprof_profile_get "$prof" ANTHROPIC_VERTEX_PROJECT_ID)"
+    region="$(ccprof_profile_get "$prof" CLOUD_ML_REGION)"
+  elif [ -n "$prof" ]; then
+    exists=0
+  fi
+
+  # Repository settings that could override the profile.
+  root="$( (cd "$dir" && git rev-parse --show-toplevel 2>/dev/null) || true)"
+  [ -n "$root" ] || root="$dir"
+  for sf in "$root/.claude/settings.json" "$root/.claude/settings.local.json"; do
+    [ -f "$sf" ] || continue
+    if grep -Eq '"(CLAUDE_CONFIG_DIR|CLAUDE_CODE_USE_[A-Z]+|ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL|VERTEX_PROJECT_ID)|CLOUD_ML_REGION|GOOGLE_CLOUD_PROJECT)"' "$sf"; then
+      warns="$warns$sf"$'\n'
+    fi
+  done
+
+  if [ $json = 1 ]; then
+    printf '{"dir":%s,"profile":%s,"exists":%s,"source":%s,"boundPath":%s,"kind":%s,"configDir":%s,"vertexProject":%s,"region":%s,"conflictingSettings":[' \
+      "$(jstr "$dir")" "$(jstr "$prof")" "$([ $exists = 1 ] && echo true || echo false)" "$(jstr "$src")" \
+      "$(jstr "$bound")" "$(jstr "$kind")" "$(jstr "$cfg")" "$(jstr "$proj")" "$(jstr "$region")"
+    local first=1 w
+    while IFS= read -r w; do
+      [ -n "$w" ] || continue
+      [ $first = 1 ] || printf ','; first=0
+      jstr "$w"
+    done <<EOF
+$warns
+EOF
+    printf ']}\n'
+    return 0
+  fi
+
+  echo "Directory:   $(ccprof_tilde "$dir")"
+  if [ -z "$prof" ]; then
+    echo "Profile:     none — claude will refuse to start here (use: ccprof bind <profile>)"
+    return 1
+  fi
+  if [ $exists = 0 ]; then
+    echo "Profile:     $prof — WARNING: this profile does not exist"
+    return 1
+  fi
+  echo "Profile:     $prof ($kind), $via"
+  echo "Config dir:  $(ccprof_tilde "$cfg")"
+  [ "$kind" != vertex ] || echo "GCP project: $proj  region: $region"
+  while IFS= read -r w; do
+    [ -n "$w" ] && echo "WARNING: $(ccprof_tilde "$w") sets account/provider variables that can override the profile"
+  done <<EOF
+$warns
+EOF
+  return 0
+}
+
+cmd_current() {
+  local dir match prof
+  dir="$(ccprof_realdir "${1:-.}")"; [ -n "$dir" ] || ccprof_die "no such directory: ${1:-.}"
+  if [ -n "${CCPROF_OVERRIDE:-}" ]; then
+    prof="$CCPROF_OVERRIDE"
+  else
+    match="$(ccprof_resolve "$dir")"
+    prof="${match%%"$CCPROF_TAB"*}"
+  fi
+  [ -n "$prof" ] || return 1
+  printf '%s\n' "$prof"
+}
+
+cmd_list_json() {
+  local n first=1 p prof
+  printf '{"version":%s,"shim":%s,"home":%s,"profiles":[' "$(jstr "$CCPROF_VERSION")" "$(jstr "$CCPROF_ROOT/shims/claude")" "$(jstr "$CCPROF_HOME")"
+  for n in $(ccprof_profile_names); do
+    [ $first = 1 ] || printf ','; first=0
+    printf '{"name":%s,"kind":%s,"configDir":%s,"vertexProject":%s}' "$(jstr "$n")" \
+      "$(jstr "$(ccprof_profile_get "$n" CCPROF_KIND)")" "$(jstr "$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)")" \
+      "$(jstr "$(ccprof_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)")"
+  done
+  printf '],"bindings":['
+  first=1
+  if [ -f "$CCPROF_PROJECTS_FILE" ]; then
+    while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+      case "$p" in ''|'#'*) continue ;; esac
+      [ $first = 1 ] || printf ','; first=0
+      printf '{"path":%s,"profile":%s,"profileExists":%s}' "$(jstr "$p")" "$(jstr "$prof")" \
+        "$(ccprof_profile_exists "$prof" && echo true || echo false)"
+    done < "$CCPROF_PROJECTS_FILE"
+  fi
+  printf ']}\n'
+}
+
+cmd_list() {
+  if [ "${1:-}" = --json ]; then cmd_list_json; return; fi
+  local n kind dir extra p prof
+  echo "Profiles:"
+  if [ -z "$(ccprof_profile_names)" ]; then echo "  (none — create the first one with: ccprof add <name>)"; fi
+  for n in $(ccprof_profile_names); do
+    kind="$(ccprof_profile_get "$n" CCPROF_KIND)"
+    dir="$(ccprof_tilde "$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)")"
+    extra=""
+    [ "$kind" != vertex ] || extra="project: $(ccprof_profile_get "$n" ANTHROPIC_VERTEX_PROJECT_ID)"
+    printf '  %-14s %-9s %s  %s\n' "$n" "$kind" "$dir" "$extra"
+  done
+  echo "Projects:"
+  if [ ! -s "$CCPROF_PROJECTS_FILE" ] || ! grep -qv '^#' "$CCPROF_PROJECTS_FILE"; then
+    echo "  (none — bind one with: cd <project> && ccprof bind <profile>)"; return 0
+  fi
+  while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+    case "$p" in ''|'#'*) continue ;; esac
+    if ccprof_profile_exists "$prof"; then extra=""; else extra="  (missing profile!)"; fi
+    printf '  %-40s → %s%s\n' "$(ccprof_tilde "$p")" "$prof" "$extra"
+  done < "$CCPROF_PROJECTS_FILE"
+}
+
+cmd_run() {
+  need_profile "${1:-}"
+  local prof="$1"; shift
+  CCPROF_OVERRIDE="$prof" exec "$CCPROF_ROOT/shims/claude" ${1+"$@"}
+}
+
+cmd_statusline() {
+  [ -t 0 ] || cat >/dev/null   # Claude Code sends JSON on stdin: not needed
+  local out="ccprof: ${CCPROF_PROFILE:-?}"
+  [ "${CCPROF_KIND:-}" != vertex ] || out="$out · vertex ${ANTHROPIC_VERTEX_PROJECT_ID:-}"
+  [ "${CCPROF_KIND:-}" != personal ] || out="$out · PERSONAL"
+  printf '%s\n' "$out"
+}
+
+cmd_doctor() {
+  local ok=0 real v n kind dir p prof cfg
+  echo "ccprof $CCPROF_VERSION in $(ccprof_tilde "$CCPROF_ROOT")"
+  if [ "$(command -v claude 2>/dev/null || true)" = "$CCPROF_ROOT/shims/claude" ]; then
+    echo "✓ the ccprof shim is the first 'claude' on PATH"
+  else
+    echo "✗ the first 'claude' on PATH is $(command -v claude 2>/dev/null || echo 'none'): the ccprof block must be the LAST thing in your rc file"; ok=1
+  fi
+  if real="$(ccprof_real_claude)"; then
+    echo "✓ real claude: $(ccprof_tilde "$real") ($("$real" --version 2>/dev/null | head -n1 || echo 'unknown version'))"
+  else
+    echo "✗ real claude not found on PATH"; ok=1
+  fi
+  for v in $CCPROF_MANAGED_VARS; do
+    case "$v" in CCPROF_*) continue ;; esac
+    if [ -n "${!v:-}" ]; then echo "! $v is set in your shell: the shim ignores it, but check that nothing else relies on it"; fi
+  done
+  for n in $(ccprof_profile_names); do
+    kind="$(ccprof_profile_get "$n" CCPROF_KIND)"; dir="$(ccprof_profile_get "$n" CLAUDE_CONFIG_DIR)"
+    if [ ! -d "$dir" ]; then echo "✗ [$n] missing config dir: $(ccprof_tilde "$dir")"; ok=1; continue; fi
+    if [ "$kind" = vertex ]; then
+      cfg="$(ccprof_profile_get "$n" CLOUDSDK_ACTIVE_CONFIG_NAME)"
+      if ! command -v gcloud >/dev/null; then echo "✗ [$n] gcloud is not installed"; ok=1
+      elif CLOUDSDK_ACTIVE_CONFIG_NAME="${cfg:-${CLOUDSDK_ACTIVE_CONFIG_NAME:-}}" gcloud auth application-default print-access-token >/dev/null 2>&1; then
+        echo "✓ [$n] ADC credentials are valid"
+      else echo "✗ [$n] ADC credentials missing or expired: ccprof login $n"; ok=1; fi
+    elif [ -f "$dir/.credentials.json" ] || grep -qs '"oauthAccount"' "$dir/.claude.json"; then
+      echo "✓ [$n] login found"
+    else
+      echo "? [$n] login not detected (on macOS credentials live in the Keychain: check with /status, or run: ccprof login $n)"
+    fi
+  done
+  if [ -f "$CCPROF_PROJECTS_FILE" ]; then
+    while IFS=$'\t' read -r p prof || [ -n "$p" ]; do
+      case "$p" in ''|'#'*) continue ;; esac
+      ccprof_profile_exists "$prof" || { echo "✗ $(ccprof_tilde "$p") → '$prof' (missing profile)"; ok=1; }
+      [ -d "$p" ] || echo "! $(ccprof_tilde "$p") no longer exists (remove it with: ccprof unbind \"$p\")"
+    done < "$CCPROF_PROJECTS_FILE"
+  fi
+  return $ok
+}
+
+cmd_init() {
+  cat <<EOF
+export PATH="$CCPROF_ROOT/shims:$CCPROF_ROOT/bin:\$PATH"
+_ccprof_complete() {
+  local cur="\${COMP_WORDS[COMP_CWORD]}" prev="\${COMP_WORDS[1]:-}"
+  if [ "\$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=(\$(compgen -W "add login rename edit remove bind unbind which current list run doctor init version help" -- "\$cur"))
+  elif [ "\$COMP_CWORD" -eq 2 ]; then
+    case "\$prev" in
+      login|rename|edit|remove|bind|run) COMPREPLY=(\$(compgen -W "\$(ls "$CCPROF_PROFILES_DIR" 2>/dev/null | sed 's/\\.env\$//')" -- "\$cur")) ;;
+      unbind|which|current) COMPREPLY=(\$(compgen -d -- "\$cur")) ;;
+    esac
+  fi
+}
+if [ -n "\${ZSH_VERSION:-}" ]; then
+  autoload -U +X compinit 2>/dev/null && { whence compdef >/dev/null || compinit -u; }
+  autoload -U +X bashcompinit 2>/dev/null && bashcompinit
+fi
+command -v complete >/dev/null 2>&1 && complete -F _ccprof_complete ccprof
+EOF
+}
+
+cmd_edit() { need_profile "${1:-}"; "${EDITOR:-vi}" "$(ccprof_profile_file "$1")"; }
+
+cmd_remove() {
+  need_profile "${1:-}"
+  local dir; dir="$(ccprof_profile_get "$1" CLAUDE_CONFIG_DIR)"
+  rm -f "$(ccprof_profile_file "$1")"
+  if [ -f "$CCPROF_PROJECTS_FILE" ]; then
+    P="$1" awk -F'\t' '$2 != ENVIRON["P"]' "$CCPROF_PROJECTS_FILE" > "$CCPROF_PROJECTS_FILE.tmp.$$"
+    mv "$CCPROF_PROJECTS_FILE.tmp.$$" "$CCPROF_PROJECTS_FILE"
+  fi
+  echo "✓ profile '$1' and its bindings removed"
+  echo "  its config dir (credentials and conversations) is still in $(ccprof_tilde "$dir"): delete it by hand if you no longer need it"
+}
+
+cmd="${1:-help}"; [ $# -eq 0 ] || shift
+case "$cmd" in
+  add) cmd_add ${1+"$@"} ;;
+  login) cmd_login ${1+"$@"} ;;
+  rename|mv) cmd_rename ${1+"$@"} ;;
+  edit) cmd_edit ${1+"$@"} ;;
+  remove|rm) cmd_remove ${1+"$@"} ;;
+  bind) cmd_bind ${1+"$@"} ;;
+  unbind) cmd_unbind ${1+"$@"} ;;
+  which) cmd_which ${1+"$@"} ;;
+  current) cmd_current ${1+"$@"} ;;
+  list|ls) cmd_list ${1+"$@"} ;;
+  run) cmd_run ${1+"$@"} ;;
+  doctor) cmd_doctor ;;
+  statusline) cmd_statusline ;;
+  init) cmd_init ;;
+  version|--version|-v) echo "ccprof $CCPROF_VERSION" ;;
+  help|--help|-h) usage ;;
+  *) ccprof_warn "unknown command: $cmd"; usage >&2; exit 1 ;;
+esac

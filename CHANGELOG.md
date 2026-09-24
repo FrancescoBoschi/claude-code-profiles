@@ -3,6 +3,19 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses [semantic versioning](https://semver.org/).
 
+## [0.4.0]
+
+### Changed
+- The command is now called **`ccprof`** (it was `ccm`), to avoid clashing with other tools.
+  Environment variables are now `CCPROF_*`; the old `CCM_*` names still work.
+- The VS Code extension is now `ccprof-vscode`, with `ccprof.*` commands and settings.
+
+### Added
+- Automatic migration from ccm: the installer moves `~/.config/ccm` to `~/.config/ccprof`,
+  updates profile files and statuslines, replaces the old shell block and keeps
+  `~/.local/share/ccm` as a link so VS Code keeps working.
+- `ccm` remains available as an alias, with a notice, for a few versions.
+
 ## [0.3.0]
 
 ### Changed

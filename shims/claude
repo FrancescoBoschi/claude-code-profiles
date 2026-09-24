@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ccm shim: replaces "claude" on PATH, applies the profile of the current
+# ccprof shim: replaces "claude" on PATH, applies the profile of the current
 # project and then runs the real claude with the same arguments.
 set -euo pipefail
-CCM_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
-. "$CCM_ROOT/lib/ccm-common.sh"
+CCPROF_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$CCPROF_ROOT/lib/ccprof-common.sh"
 
 # Wrapper mode (VS Code claudeCode.claudeProcessWrapper): the extension passes
 # its own claude binary as the first argument. Use it instead of the one on
@@ -11,11 +11,11 @@ CCM_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 if [ $# -gt 0 ] && [ "${1##*/}" = claude ] && [ -f "$1" ] && [ -x "$1" ] && ! [ "$1" -ef "$0" ]; then
   real="$1"; shift
 else
-  real="$(ccm_real_claude)" || ccm_die "real 'claude' binary not found on PATH (install Claude Code or set CCM_REAL_CLAUDE)"
+  real="$(ccprof_real_claude)" || ccprof_die "real 'claude' binary not found on PATH (install Claude Code or set CCPROF_REAL_CLAUDE)"
 fi
 
 # Explicit escape hatch: no profile handling at all.
-if [ "${CCM_BYPASS:-}" = 1 ]; then exec "$real" ${1+"$@"}; fi
+if [ "${CCPROF_BYPASS:-}" = 1 ]; then exec "$real" ${1+"$@"}; fi
 
 # Commands that do not depend on the account.
 case "${1:-}" in
@@ -23,22 +23,22 @@ case "${1:-}" in
 esac
 
 here="$(pwd -P)"
-if [ -n "${CCM_OVERRIDE:-}" ]; then
-  prof="$CCM_OVERRIDE"
+if [ -n "${CCPROF_OVERRIDE:-}" ]; then
+  prof="$CCPROF_OVERRIDE"
 else
-  match="$(ccm_resolve "$here")"
-  prof="${match%%"$CCM_TAB"*}"
+  match="$(ccprof_resolve "$here")"
+  prof="${match%%"$CCPROF_TAB"*}"
 fi
 
 if [ -z "$prof" ]; then
   {
-    echo "ccm: no profile bound to $(ccm_tilde "$here")"
-    echo "     bind this project:   ccm bind <profile>"
-    echo "     or just this once:   ccm run <profile> [args]"
-    echo "     available profiles:  $(ccm_profile_names | tr '\n' ' ')"
+    echo "ccprof: no profile bound to $(ccprof_tilde "$here")"
+    echo "     bind this project:   ccprof bind <profile>"
+    echo "     or just this once:   ccprof run <profile> [args]"
+    echo "     available profiles:  $(ccprof_profile_names | tr '\n' ' ')"
   } >&2
   exit 1
 fi
 
-ccm_load_profile "$prof"
+ccprof_load_profile "$prof"
 exec "$real" ${1+"$@"}

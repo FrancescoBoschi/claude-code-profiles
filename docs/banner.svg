@@ -42,11 +42,11 @@
     <circle cx="74" cy="20" r="7" fill="#3fb950"/>
     <g font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="20">
       <text x="26" y="82" fill="#8b949e">~/work/client-app <tspan fill="#f0f6fc">$ claude</tspan></text>
-      <text x="26" y="116" fill="#3fb950">● ccm: team</text>
+      <text x="26" y="116" fill="#3fb950">● ccprof: team</text>
       <text x="26" y="172" fill="#8b949e">~/work/platform <tspan fill="#f0f6fc">$ claude</tspan></text>
-      <text x="26" y="206" fill="#58a6ff">● ccm: vertex · acme-billing</text>
+      <text x="26" y="206" fill="#58a6ff">● ccprof: vertex · acme-billing</text>
       <text x="26" y="262" fill="#8b949e">~/personal/blog <tspan fill="#f0f6fc">$ claude</tspan></text>
-      <text x="26" y="296" fill="#d29922">● ccm: personal</text>
+      <text x="26" y="296" fill="#d29922">● ccprof: personal</text>
     </g>
   </g>
 </svg>

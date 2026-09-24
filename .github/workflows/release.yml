@@ -18,24 +18,24 @@ jobs:
       - name: Check that the tag matches the version
         run: |
           v="${GITHUB_REF_NAME#v}"
-          grep -q "^CCM_VERSION=\"$v\"" lib/ccm-common.sh || { echo "CCM_VERSION is not $v"; exit 1; }
+          grep -q "^CCPROF_VERSION=\"$v\"" lib/ccprof-common.sh || { echo "CCPROF_VERSION is not $v"; exit 1; }
           test "$(node -p "require('./vscode/package.json').version")" = "$v" || { echo "vscode/package.json is not $v"; exit 1; }
       - name: Test
         run: bash tests/smoke.sh && node vscode/test/run.js
       - name: Build VS Code extension
         run: |
           cp LICENSE vscode/LICENSE
-          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccm-vscode.vsix
+          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccprof-vscode.vsix
       - name: Archive
         run: |
-          mkdir -p dist/ccm
-          cp -R bin lib shims tests vscode docs install.sh README.md LICENSE CHANGELOG.md dist/ccm/
-          rm -f dist/ccm/vscode/LICENSE
-          cp ccm-vscode.vsix dist/ccm/
-          tar czf ccm.tar.gz -C dist ccm
+          mkdir -p dist/ccprof
+          cp -R bin lib shims tests vscode docs install.sh README.md LICENSE CHANGELOG.md dist/ccprof/
+          rm -f dist/ccprof/vscode/LICENSE
+          cp ccprof-vscode.vsix dist/ccprof/
+          tar czf ccprof.tar.gz -C dist ccprof
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" ccm.tar.gz ccm-vscode.vsix \
-            --title "ccm $GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" ccprof.tar.gz ccprof-vscode.vsix \
+            --title "ccprof $GITHUB_REF_NAME" --generate-notes

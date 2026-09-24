@@ -1,4 +1,4 @@
-// ccm for VS Code: a thin UI on top of the "ccm" CLI, which stays the single source of truth.
+// ccprof for VS Code: a thin UI on top of the "ccprof" CLI, which stays the single source of truth.
 'use strict';
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -15,21 +15,21 @@ let watcher;
 // ---------------------------------------------------------------- CLI
 
 function ccmPath() {
-  const configured = vscode.workspace.getConfiguration('ccm').get('path');
+  const configured = vscode.workspace.getConfiguration('ccprof').get('path');
   if (configured) return configured.replace(/^~(?=\/|$)/, os.homedir());
-  const def = path.join(os.homedir(), '.local', 'share', 'ccm', 'bin', 'ccm');
-  return fs.existsSync(def) ? def : 'ccm';
+  const def = path.join(os.homedir(), '.local', 'share', 'ccprof', 'bin', 'ccprof');
+  return fs.existsSync(def) ? def : 'ccprof';
 }
 
 function run(args, cwd) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
-    delete env.CCM_OVERRIDE;
-    delete env.CCM_BYPASS;
+    delete env.CCPROF_OVERRIDE;
+    delete env.CCPROF_BYPASS;
     cp.execFile(ccmPath(), args, { cwd: cwd || os.homedir(), env, timeout: 30000, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err && err.code === 'ENOENT') {
-          return reject(new Error('ccm not found: install it, or set "ccm.path" in your settings'));
+          return reject(new Error('ccprof not found: install it, or set "ccprof.path" in your settings'));
         }
         const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
         resolve({ code, stdout: String(stdout), stderr: String(stderr) });
@@ -39,13 +39,13 @@ function run(args, cwd) {
 
 async function runJson(args) {
   const r = await run(args);
-  if (r.code !== 0) throw new Error(r.stderr.trim() || `ccm ${args.join(' ')}: exit code ${r.code}`);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `ccprof ${args.join(' ')}: exit code ${r.code}`);
   return JSON.parse(r.stdout);
 }
 
 async function runOrThrow(args) {
   const r = await run(args);
-  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `ccm ${args.join(' ')} failed`);
+  if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || `ccprof ${args.join(' ')} failed`);
   return r.stdout.trim();
 }
 
@@ -69,7 +69,7 @@ function describe(info) {
 async function pickFolder(placeHolder) {
   const folders = fileFolders();
   if (!folders.length) {
-    vscode.window.showErrorMessage('ccm: open a project folder first.');
+    vscode.window.showErrorMessage('ccprof: open a project folder first.');
     return undefined;
   }
   if (folders.length === 1) return folders[0];
@@ -87,12 +87,12 @@ async function pickProfile(placeHolder, current, allowNew) {
     detail: tilde(p.configDir),
     profile: p.name,
   }));
-  if (allowNew) items.push({ label: '$(add) New profile…', description: 'opens a terminal with "ccm add"', create: true });
+  if (allowNew) items.push({ label: '$(add) New profile…', description: 'opens a terminal with "ccprof add"', create: true });
   const pick = await vscode.window.showQuickPick(items, { placeHolder });
   if (pick && pick.create) {
-    const t = vscode.window.createTerminal({ name: 'ccm add' });
+    const t = vscode.window.createTerminal({ name: 'ccprof add' });
     t.show();
-    t.sendText('ccm add ', false);
+    t.sendText('ccprof add ', false);
     return undefined;
   }
   return pick && pick.profile;
@@ -112,7 +112,7 @@ async function refresh() {
   try {
     infos = await Promise.all(folders.map(async f => ({ folder: f, info: await runJson(['which', '--json', f.uri.fsPath]) })));
   } catch (e) {
-    status.text = '$(warning) ccm';
+    status.text = '$(warning) ccprof';
     status.tooltip = e.message;
     status.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     status.show();
@@ -121,20 +121,20 @@ async function refresh() {
 
   const main = infos[0].info;
   const mixed = new Set(infos.map(i => i.info.profile || '')).size > 1;
-  const highlight = vscode.workspace.getConfiguration('ccm').get('highlightPersonal', true);
+  const highlight = vscode.workspace.getConfiguration('ccprof').get('highlightPersonal', true);
 
   if (!main.profile || !main.exists) {
-    status.text = `$(circle-slash) ccm: ${main.profile ? main.profile + '?' : 'no profile'}`;
+    status.text = `$(circle-slash) ccprof: ${main.profile ? main.profile + '?' : 'no profile'}`;
     status.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   } else {
-    status.text = `$(account) ccm: ${main.profile}` + (main.kind === 'vertex' && main.vertexProject ? ` · ${main.vertexProject}` : '');
+    status.text = `$(account) ccprof: ${main.profile}` + (main.kind === 'vertex' && main.vertexProject ? ` · ${main.vertexProject}` : '');
     status.backgroundColor = main.kind === 'personal' && highlight
       ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
   }
   if (mixed || main.conflictingSettings.length) status.text += ' $(warning)';
 
   const md = new vscode.MarkdownString(undefined, true);
-  md.appendMarkdown('**ccm — Claude Code profile**\n\n');
+  md.appendMarkdown('**ccprof — Claude Code profile**\n\n');
   for (const { folder, info } of infos) {
     md.appendMarkdown(`- **${folder.name}**: ${describe(info)}`);
     if (info.source === 'bind' && info.boundPath !== info.dir) md.appendMarkdown(` _(from ${tilde(info.boundPath)})_`);
@@ -174,7 +174,7 @@ async function cmdBind() {
   await runOrThrow(['bind', profile, scope.path]);
   await refresh();
   const choice = await vscode.window.showInformationMessage(
-    `ccm: ${tilde(scope.path)} → ${profile}. New Claude sessions will use this profile; sessions already open keep the previous one.`,
+    `ccprof: ${tilde(scope.path)} → ${profile}. New Claude sessions will use this profile; sessions already open keep the previous one.`,
     'Reload Window');
   if (choice) vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
@@ -184,7 +184,7 @@ async function cmdUnbind() {
   if (!folder) return;
   const info = await runJson(['which', '--json', folder.uri.fsPath]);
   if (info.source !== 'bind') {
-    vscode.window.showInformationMessage(`ccm: ${folder.name} has no binding.`);
+    vscode.window.showInformationMessage(`ccprof: ${folder.name} has no binding.`);
     return;
   }
   let target = info.boundPath;
@@ -196,7 +196,7 @@ async function cmdUnbind() {
   }
   await runOrThrow(['unbind', target]);
   await refresh();
-  vscode.window.showInformationMessage(`ccm: binding removed from ${tilde(target)}.`);
+  vscode.window.showInformationMessage(`ccprof: binding removed from ${tilde(target)}.`);
 }
 
 async function cmdOpenTerminal() {
@@ -205,7 +205,7 @@ async function cmdOpenTerminal() {
   const info = await runJson(['which', '--json', folder.uri.fsPath]);
   const profile = await pickProfile('Which profile?', info.profile, false);
   if (!profile) return;
-  const env = profile !== info.profile ? { CCM_OVERRIDE: profile } : undefined;
+  const env = profile !== info.profile ? { CCPROF_OVERRIDE: profile } : undefined;
   const t = vscode.window.createTerminal({ name: `Claude · ${profile}`, cwd: folder.uri, env });
   t.show();
   t.sendText('claude');
@@ -213,7 +213,7 @@ async function cmdOpenTerminal() {
 
 async function showInOutput(title, args) {
   output.clear();
-  output.appendLine(`$ ccm ${args.join(' ')}`);
+  output.appendLine(`$ ccprof ${args.join(' ')}`);
   output.show(true);
   const r = await run(args);
   output.append(r.stdout);
@@ -227,39 +227,39 @@ async function checkPanelWrapper(interactive) {
   const conf = vscode.workspace.getConfiguration('claudeCode');
   const current = conf.get('claudeProcessWrapper');
   if (current === list.shim) {
-    if (interactive) vscode.window.showInformationMessage('ccm: the Claude Code panel already goes through ccm.');
+    if (interactive) vscode.window.showInformationMessage('ccprof: the Claude Code panel already goes through ccprof.');
     return;
   }
-  if (!interactive && ctx.globalState.get('ccm.skipWrapperCheck')) return;
+  if (!interactive && ctx.globalState.get('ccprof.skipWrapperCheck')) return;
   const msg = current
-    ? `ccm: the Claude Code panel uses another wrapper (${current}) and does not apply ccm profiles.`
-    : 'ccm: the Claude Code panel does not go through ccm and would use the default account.';
+    ? `ccprof: the Claude Code panel uses another wrapper (${current}) and does not apply ccprof profiles.`
+    : 'ccprof: the Claude Code panel does not go through ccprof and would use the default account.';
   const buttons = interactive ? ['Configure'] : ['Configure', 'Don\'t Ask Again'];
   const choice = await vscode.window.showWarningMessage(msg, ...buttons);
   if (choice === 'Configure') {
     await conf.update('claudeProcessWrapper', list.shim, vscode.ConfigurationTarget.Global);
-    const r = await vscode.window.showInformationMessage('ccm: panel configured. Reload the window to apply it.', 'Reload Window');
+    const r = await vscode.window.showInformationMessage('ccprof: panel configured. Reload the window to apply it.', 'Reload Window');
     if (r) vscode.commands.executeCommand('workbench.action.reloadWindow');
   } else if (choice === 'Don\'t Ask Again') {
-    await ctx.globalState.update('ccm.skipWrapperCheck', true);
+    await ctx.globalState.update('ccprof.skipWrapperCheck', true);
   }
 }
 
 async function cmdMenu() {
   const pick = await vscode.window.showQuickPick([
-    { label: '$(link) Bind Profile to Workspace', cmd: 'ccm.bind' },
-    { label: '$(debug-disconnect) Remove Binding', cmd: 'ccm.unbind' },
-    { label: '$(terminal) Open Claude Terminal with Profile…', cmd: 'ccm.openTerminal' },
-    { label: '$(list-unordered) Show Profiles and Projects', cmd: 'ccm.list' },
-    { label: '$(pulse) Doctor', cmd: 'ccm.doctor' },
-    { label: '$(gear) Configure Claude Code Panel', cmd: 'ccm.configurePanel' },
-  ], { placeHolder: 'ccm' });
+    { label: '$(link) Bind Profile to Workspace', cmd: 'ccprof.bind' },
+    { label: '$(debug-disconnect) Remove Binding', cmd: 'ccprof.unbind' },
+    { label: '$(terminal) Open Claude Terminal with Profile…', cmd: 'ccprof.openTerminal' },
+    { label: '$(list-unordered) Show Profiles and Projects', cmd: 'ccprof.list' },
+    { label: '$(pulse) Doctor', cmd: 'ccprof.doctor' },
+    { label: '$(gear) Configure Claude Code Panel', cmd: 'ccprof.configurePanel' },
+  ], { placeHolder: 'ccprof' });
   if (pick) vscode.commands.executeCommand(pick.cmd);
 }
 
 function guarded(fn) {
   return async (...args) => {
-    try { await fn(...args); } catch (e) { vscode.window.showErrorMessage(`ccm: ${e.message}`); }
+    try { await fn(...args); } catch (e) { vscode.window.showErrorMessage(`ccprof: ${e.message}`); }
   };
 }
 
@@ -275,32 +275,32 @@ async function watchConfig() {
 
 function activate(context) {
   ctx = context;
-  output = vscode.window.createOutputChannel('ccm');
+  output = vscode.window.createOutputChannel('ccprof');
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.command = 'ccm.menu';
-  status.name = 'ccm — Claude Code profile';
+  status.command = 'ccprof.menu';
+  status.name = 'ccprof — Claude Code profile';
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, guarded(fn)));
-  reg('ccm.menu', cmdMenu);
-  reg('ccm.bind', cmdBind);
-  reg('ccm.unbind', cmdUnbind);
-  reg('ccm.openTerminal', cmdOpenTerminal);
-  reg('ccm.list', () => showInOutput('Profiles and projects', ['list']));
-  reg('ccm.doctor', () => showInOutput('Doctor', ['doctor']));
-  reg('ccm.configurePanel', () => checkPanelWrapper(true));
-  reg('ccm.refresh', refresh);
+  reg('ccprof.menu', cmdMenu);
+  reg('ccprof.bind', cmdBind);
+  reg('ccprof.unbind', cmdUnbind);
+  reg('ccprof.openTerminal', cmdOpenTerminal);
+  reg('ccprof.list', () => showInOutput('Profiles and projects', ['list']));
+  reg('ccprof.doctor', () => showInOutput('Doctor', ['doctor']));
+  reg('ccprof.configurePanel', () => checkPanelWrapper(true));
+  reg('ccprof.refresh', refresh);
 
   context.subscriptions.push(
     status, output,
     vscode.workspace.onDidChangeWorkspaceFolders(scheduleRefresh),
     vscode.window.onDidChangeWindowState(s => { if (s.focused) scheduleRefresh(); }),
-    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('ccm')) scheduleRefresh(); }),
+    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('ccprof')) scheduleRefresh(); }),
     { dispose: () => { if (watcher) watcher.close(); clearTimeout(refreshTimer); } },
   );
 
   refresh().catch(() => {});
   watchConfig();
-  if (vscode.workspace.getConfiguration('ccm').get('checkClaudeWrapper', true)) {
+  if (vscode.workspace.getConfiguration('ccprof').get('checkClaudeWrapper', true)) {
     checkPanelWrapper(false).catch(() => {});
   }
 }

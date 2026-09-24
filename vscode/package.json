@@ -1,8 +1,8 @@
 {
-  "name": "ccm-vscode",
-  "displayName": "ccm — Claude Code Manager",
-  "description": "See and switch the Claude Code profile (Team, personal, Vertex AI) of each workspace, powered by the ccm CLI. Unofficial.",
-  "version": "0.3.0",
+  "name": "ccprof-vscode",
+  "displayName": "ccprof — Claude Code Profiles",
+  "description": "See and switch the Claude Code profile (Team, personal, Vertex AI) of each workspace, powered by the ccprof CLI. Unofficial.",
+  "version": "0.4.0",
   "publisher": "francescoboschi",
   "license": "MIT",
   "repository": {
@@ -33,63 +33,63 @@
   "contributes": {
     "commands": [
       {
-        "command": "ccm.menu",
+        "command": "ccprof.menu",
         "title": "Menu",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.bind",
+        "command": "ccprof.bind",
         "title": "Bind Profile to Workspace",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.unbind",
+        "command": "ccprof.unbind",
         "title": "Remove Binding",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.openTerminal",
+        "command": "ccprof.openTerminal",
         "title": "Open Claude Terminal with Profile…",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.list",
+        "command": "ccprof.list",
         "title": "Show Profiles and Projects",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.doctor",
+        "command": "ccprof.doctor",
         "title": "Doctor",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.configurePanel",
+        "command": "ccprof.configurePanel",
         "title": "Configure Claude Code Panel",
-        "category": "ccm"
+        "category": "ccprof"
       },
       {
-        "command": "ccm.refresh",
+        "command": "ccprof.refresh",
         "title": "Refresh Status",
-        "category": "ccm"
+        "category": "ccprof"
       }
     ],
     "configuration": {
-      "title": "ccm",
+      "title": "ccprof",
       "properties": {
-        "ccm.path": {
+        "ccprof.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to the `ccm` executable. Empty = `~/.local/share/ccm/bin/ccm`, otherwise `ccm` from PATH."
+          "markdownDescription": "Path to the `ccprof` executable. Empty = `~/.local/share/ccprof/bin/ccprof`, otherwise `ccprof` from PATH."
         },
-        "ccm.highlightPersonal": {
+        "ccprof.highlightPersonal": {
           "type": "boolean",
           "default": true,
           "description": "Highlight the status bar when the workspace uses a personal profile."
         },
-        "ccm.checkClaudeWrapper": {
+        "ccprof.checkClaudeWrapper": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "On startup, check that `claudeCode.claudeProcessWrapper` points to the ccm shim."
+          "markdownDescription": "On startup, check that `claudeCode.claudeProcessWrapper` points to the ccprof shim."
         }
       }
     }

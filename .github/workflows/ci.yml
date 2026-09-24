@@ -28,10 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck -s bash bin/ccm shims/claude lib/ccm-common.sh install.sh tests/smoke.sh
+        run: shellcheck -s bash bin/ccprof bin/ccm shims/claude lib/ccprof-common.sh install.sh tests/smoke.sh
       - name: Versions in sync
         run: |
-          cli=$(sed -n 's/^CCM_VERSION="\(.*\)"/\1/p' lib/ccm-common.sh)
+          cli=$(sed -n 's/^CCPROF_VERSION="\(.*\)"/\1/p' lib/ccprof-common.sh)
           ext=$(node -p "require('./vscode/package.json').version")
           echo "CLI $cli — extension $ext"
           test "$cli" = "$ext"
@@ -41,4 +41,4 @@ jobs:
       - name: Build extension (check)
         run: |
           cp LICENSE vscode/LICENSE
-          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccm-vscode.vsix
+          cd vscode && npx --yes @vscode/vsce@latest package -o ../ccprof-vscode.vsix
