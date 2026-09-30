@@ -41,8 +41,30 @@ variables to remember, no risk of billing the wrong project.
 - **Terminal and VS Code.** The official Claude Code panel uses the same profiles, and a status bar shows which one is active.
 - **Private by design.** No telemetry, no network calls at runtime, no dependencies beyond bash. Credentials never leave your machine: logins stay where Claude Code, gcloud and aws keep them, and API keys live in your OS keychain, never in a file.
 
+## How ccprof compares
+
+There are several good tools for using more than one Claude Code account, and it is worth
+picking the one that fits how you work. Most switch the account per shell or per command
+(for example [ukogan/claude-account-switcher](https://github.com/ukogan/claude-account-switcher)
+or [ftery0/claude-account-switch](https://github.com/ftery0/claude-account-switch)); some pick it
+per folder with a `.claude-profile` file ([caeser1996/claude-switch](https://github.com/caeser1996/claude-switch))
+or, inside VS Code, with a folder map ([timvgl/account-switcher-for-claude-code](https://github.com/timvgl/account-switcher-for-claude-code)).
+
+What ccprof does differently:
+
+- **Bound per project, outside your repositories.** No marker files to commit or to keep out of shared repos, and no "active profile" to remember: the folder decides.
+- **Fail-closed.** An unbound folder refuses to start instead of falling back to a default account.
+- **Billing backends, not just logins.** Vertex AI, Amazon Bedrock and API keys alongside subscriptions, with the competing environment variables cleared so a stray `GOOGLE_CLOUD_PROJECT` or `ANTHROPIC_API_KEY` cannot redirect the bill.
+- **One configuration for the terminal and the VS Code panel.**
+- **Plain bash, no dependencies**, tested on the bash 3.2 that ships with macOS.
+
+When another tool may suit you better: native Windows (ccprof needs WSL there), sharing skills,
+plugins and MCP servers across accounts ([habibtalib/claude-profiles](https://github.com/habibtalib/claude-profiles)),
+or managing Claude Desktop too ([jmdarre-v/claude-multiprofile](https://github.com/jmdarre-v/claude-multiprofile)).
+
 ## Contents
 
+- [How ccprof compares](#how-ccprof-compares)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Setup in 5 minutes](#setup-in-5-minutes)
@@ -51,6 +73,7 @@ variables to remember, no risk of billing the wrong project.
 - [Commands](#commands)
 - [How it works](#how-it-works)
 - [Existing conversations](#existing-conversations)
+- [FAQ](#faq)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
 - [Updating and uninstalling](#updating-and-uninstalling)
@@ -305,6 +328,30 @@ Some per-project settings (folder trust, granted permissions, MCP servers added 
 `claude mcp add` in local scope) have to be set up again in the new profile. MCP servers
 defined in the repository's `.mcp.json` work right away.
 
+## FAQ
+
+**Isn't this just an alias around `CLAUDE_CONFIG_DIR`?** That is where it starts. On top of it,
+ccprof picks the profile from the folder automatically, refuses to run where no profile is bound,
+clears the variables that could silently switch account or billing, handles Vertex, Bedrock and
+API keys, and applies the same rules to the VS Code panel.
+
+**Is it safe with my credentials?** ccprof never copies or sends your logins (`ccprof doctor` only
+checks that they exist): Claude Code, gcloud and aws keep them where they always do. The only secret ccprof handles is an API key you
+choose to add, which goes straight into your OS keychain. It makes no network calls at runtime.
+
+**Can I use two accounts at the same time?** Yes. Two terminals in two projects run with their
+own profiles side by side, including two VS Code windows.
+
+**Does it work on Windows?** Inside WSL, yes. Native Windows is not supported.
+
+**Do plugins and skills carry over between profiles?** No, each profile is isolated. Skills in a
+repository's `.claude/skills/` and plugins declared in its `.claude/settings.json` work for every
+profile that opens it.
+
+**What happens when Claude Code updates?** Usually nothing: ccprof wraps the `claude` binary
+instead of patching it. It relies on a couple of behaviours that are not formally specified (see
+[Known limitations](#known-limitations)), so run `ccprof doctor` after big updates.
+
 ## Troubleshooting
 
 **`ccprof: command not found`, or `doctor` says the shim is not the first `claude`.**
@@ -337,8 +384,9 @@ account, in each profile file.
 
 ## Known limitations
 
-- `CLAUDE_CONFIG_DIR` is widely used but not officially documented. After every Claude Code
-  update, run `ccprof doctor` and check `/status`.
+- `CLAUDE_CONFIG_DIR` is described in the official docs as moving everything that normally lives
+  in `~/.claude`, but its use for multiple accounts is not formally specified. After big Claude
+  Code updates, run `ccprof doctor` and check `/status`.
 - The way the VS Code panel calls `claudeProcessWrapper` (first argument = the extension's
   binary) was observed, not documented. If it changes, the shim falls back to the binary on PATH.
 - With `CLAUDE_CONFIG_DIR` set, some Claude Code versions still read `~/.claude/CLAUDE.md`
