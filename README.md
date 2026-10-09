@@ -223,8 +223,12 @@ What you get:
   - *Show Profiles and Projects*, *Doctor*;
   - *Configure Claude Code Panel*.
 
+Switching a project to another profile from the status bar offers to **bring its conversations
+along**, so you can resume them with the new profile (`ccprof.bringConversations`: `ask`,
+`always` or `never`).
+
 Settings: `ccprof.path` (path to ccprof, if not the default one), `ccprof.highlightPersonal`,
-`ccprof.checkClaudeWrapper`.
+`ccprof.checkClaudeWrapper`, `ccprof.bringConversations`.
 
 ### Without the ccprof extension
 
@@ -247,7 +251,9 @@ same profile.
   (or use the VS Code status bar). This is on purpose: an error is better than the wrong account.
 - **Another account, just once?** `ccprof run <profile>` (accepts the same arguments as `claude`).
 - **Move a project to another account?** `ccprof bind <other-profile>`. It applies to new
-  sessions; sessions already open keep the previous profile.
+  sessions; sessions already open keep the previous profile. To keep working on the same
+  conversation, close it, then run `ccprof import --from ~/.claude-accounts/<old-profile>` and
+  `claude --resume`. In VS Code, switching from the status bar offers to do this for you.
 - **Which profile am I on?** `ccprof current` prints just the name, handy in a shell prompt.
 
 ## Commands
@@ -261,7 +267,7 @@ same profile.
 | `ccprof unbind [dir]` | remove the binding |
 | `ccprof which [dir] [--json]` | the profile that would be used, and warnings about conflicting repo settings |
 | `ccprof current [dir]` | just the profile name (exit code 1 if none) |
-| `ccprof import [dir] [--from DIR]` | copy the project's older conversations (default: from `~/.claude`) into its profile |
+| `ccprof import [dir] [--from DIR] [--json]` | bring the project's conversations from another config dir (default: `~/.claude`) into its profile; newer data is never overwritten |
 | `ccprof list [--json]` | profiles and bound projects |
 | `ccprof run <profile> [args]` | run claude with a forced profile |
 | `ccprof doctor` | check PATH, logins, credentials and orphaned bindings |

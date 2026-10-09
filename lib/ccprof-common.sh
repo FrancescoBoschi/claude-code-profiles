@@ -2,7 +2,7 @@
 # ccprof — shared library. Compatible with bash 3.2 (macOS) and later.
 
 # shellcheck disable=SC2034  # used by bin/ccprof
-CCPROF_VERSION="0.5.0"
+CCPROF_VERSION="0.6.0"
 CCPROF_TAB="$(printf '\t')"
 # Backward compatibility with ccm (<= 0.3.x): the old CCM_* variables still work.
 for _ccprof_v in HOME OVERRIDE BYPASS REAL_CLAUDE ACCOUNTS_DIR; do

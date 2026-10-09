@@ -166,16 +166,45 @@ async function cmdBind() {
   ], { placeHolder: `Where should "${profile}" apply?` });
   if (!scope) return;
 
+  // Switching an existing project: offer to bring its conversations along.
+  let bring = false;
   if (info.profile && info.exists && info.profile !== profile) {
-    const ok = await vscode.window.showWarningMessage(
-      `Switching from "${info.profile}" to "${profile}". Existing conversations stay in the "${info.profile}" profile and will not be visible from "${profile}".`,
-      { modal: true }, 'Continue');
-    if (ok !== 'Continue') return;
+    const mode = vscode.workspace.getConfiguration('ccprof').get('bringConversations', 'ask');
+    if (mode === 'never') {
+      const ok = await vscode.window.showWarningMessage(
+        `Switching from "${info.profile}" to "${profile}". Existing conversations stay in the "${info.profile}" profile and will not be visible from "${profile}".`,
+        { modal: true }, 'Continue');
+      if (ok !== 'Continue') return;
+    } else if (mode === 'always') {
+      const ok = await vscode.window.showWarningMessage(
+        `Switching from "${info.profile}" to "${profile}". This project's conversations will be copied to "${profile}" so you can resume them.`,
+        { modal: true }, 'Continue');
+      if (ok !== 'Continue') return;
+      bring = true;
+    } else {
+      const ok = await vscode.window.showWarningMessage(
+        `Switching from "${info.profile}" to "${profile}". Bring this project's conversations along, so you can resume them with "${profile}"? Close running Claude sessions of this project first.`,
+        { modal: true }, 'Switch and Bring Conversations', 'Switch Only');
+      if (!ok) return;
+      bring = ok === 'Switch and Bring Conversations';
+    }
   }
   await runOrThrow(['bind', profile, scope.path]);
+  let brought = '';
+  if (bring) {
+    const r = await run(['import', '--json', '--from', info.configDir, target]);
+    if (r.code === 0) {
+      const res = JSON.parse(r.stdout);
+      brought = res.added + res.updated > 0
+        ? ` Conversations brought along (${res.added} new, ${res.updated} updated): open the Claude panel's history to resume one.`
+        : ' Conversations were already up to date.';
+    } else {
+      brought = ' No conversations to bring for this project.';
+    }
+  }
   await refresh();
   const choice = await vscode.window.showInformationMessage(
-    `ccprof: ${tilde(scope.path)} → ${profile}. New Claude sessions will use this profile; sessions already open keep the previous one.`,
+    `ccprof: ${tilde(scope.path)} → ${profile}. New Claude sessions will use this profile; sessions already open keep the previous one.${brought}`,
     'Reload Window');
   if (choice) vscode.commands.executeCommand('workbench.action.reloadWindow');
 }

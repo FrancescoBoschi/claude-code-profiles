@@ -3,6 +3,19 @@
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 uses [semantic versioning](https://semver.org/).
 
+## [0.6.0]
+
+### Added
+- VS Code: when you switch a project to another profile, the extension offers to bring its
+  conversations along so you can resume them there (setting `ccprof.bringConversations`:
+  `ask`, `always` or `never`).
+- `ccprof import --json`.
+
+### Changed
+- `ccprof import` now also refreshes files that are newer at the source, and keeps the original
+  dates. Switching a project back and forth between profiles (for example Team → Vertex → Team)
+  keeps the latest version of each conversation and never overwrites newer data.
+
 ## [0.5.0]
 
 ### Added

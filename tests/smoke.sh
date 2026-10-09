@@ -192,6 +192,12 @@ check "import copies the conversations into the bound profile" '[ -f "$dst/s1.js
 echo '{"changed":1}' > "$dst/s1.jsonl"
 (cd "$T/side/tool" && ccprof import >/dev/null)
 check "import never overwrites existing files" 'grep -q changed "$dst/s1.jsonl"'
+touch -t 202001010000 "$dst/s1.jsonl"; echo '{"newer":1}' > "$HOME/.claude/projects/$enc/s1.jsonl"
+(cd "$T/side/tool" && ccprof import >/dev/null)
+check "import refreshes files that are newer at the source" 'grep -q newer "$dst/s1.jsonl"'
+check "import keeps the original dates" '! [ "$dst/s1.jsonl" -nt "$HOME/.claude/projects/$enc/s1.jsonl" ] && ! [ "$HOME/.claude/projects/$enc/s1.jsonl" -nt "$dst/s1.jsonl" ]'
+mkdir -p "$HOME/.claude/projects/$enc/s1/subagents"; echo '{}' > "$HOME/.claude/projects/$enc/s1/subagents/a.jsonl"
+check "import --json reports what it copied" '[[ "$(cd "$T/side/tool" && ccprof import --json)" == *"\"added\":1,\"updated\":0"* ]] && [ -f "$dst/s1/subagents/a.jsonl" ]'
 check "import fails cleanly without conversations" '! (cd "$T/work/app" && ccprof import >/dev/null 2>&1)'
 
 echo "Migration from ccm (<= 0.3.x)"

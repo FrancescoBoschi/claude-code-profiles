@@ -27,7 +27,8 @@ Projects
   which [dir] [--json]  show which profile would be used here, and why
   current [dir]         print just the profile name (for prompts and scripts)
   import [dir] [--from DIR]
-                        copy this project's older conversations (default: from ~/.claude)
+                        bring this project's conversations from another config dir
+                        (default: ~/.claude; e.g. --from ~/.claude-accounts/work)
 
 Other
   list [--json]         profiles and bound projects
@@ -428,10 +429,11 @@ cmd_api_key() { # used by Claude Code's apiKeyHelper
 }
 
 cmd_import() {
-  local a dir="" from="$HOME/.claude" prof match cfg enc src dst f n=0
+  local dir="" from="$HOME/.claude" json=0 prof match cfg enc src dst f rel added=0 updated=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --from) [ $# -ge 2 ] || ccprof_die "missing value for --from"; from="$2"; shift 2 ;;
+      --json) json=1; shift ;;
       *) dir="$1"; shift ;;
     esac
   done
@@ -450,15 +452,28 @@ cmd_import() {
   [ -d "$src" ] || ccprof_die "no conversations for $(ccprof_tilde "$dir") in $(ccprof_tilde "$from/projects")"
   dst="$cfg/projects/$enc"
   mkdir -p "$dst"
-  for f in "$src"/* "$src"/.[!.]*; do
-    [ -e "$f" ] || continue
-    [ -e "$dst/${f##*/}" ] && continue
-    cp -R "$f" "$dst/"; n=$((n+1))
-  done
-  echo "✓ copied $n item(s) into profile '$prof' (existing ones kept, originals untouched)"
+  # Copy files that are missing, and refresh those that are older than the source.
+  # Dates are preserved (cp -p), so switching back and forth between profiles keeps
+  # the most recent version of each conversation and never overwrites newer data.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    rel="${f#"$src"/}"
+    if [ ! -e "$dst/$rel" ]; then
+      mkdir -p "$(dirname "$dst/$rel")"; cp -p "$f" "$dst/$rel"; added=$((added+1))
+    elif [ "$f" -nt "$dst/$rel" ]; then
+      cp -p "$f" "$dst/$rel"; updated=$((updated+1))
+    fi
+  done <<EOF
+$(find "$src" -type f)
+EOF
+  if [ $json = 1 ]; then
+    printf '{"profile":%s,"added":%s,"updated":%s}\n' "$(jstr "$prof")" "$added" "$updated"
+    return 0
+  fi
+  echo "✓ profile '$prof': $added new and $updated updated file(s) (newer data is never overwritten, originals untouched)"
   echo "  from: $(ccprof_tilde "$src")"
   echo "  to:   $(ccprof_tilde "$dst")"
-  echo "  tip: close running claude sessions of this project before importing; use claude --resume to pick one"
+  echo "  tip: close running claude sessions of this project first; then pick the conversation with claude --resume"
 }
 
 cmd_doctor() {

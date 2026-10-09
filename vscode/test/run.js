@@ -118,14 +118,34 @@ async function test(name, fn) {
     assert.strictEqual(statusItem.text, '$(account) ccprof: gcp · acme-bill');
   });
 
-  await test('switching profile asks for confirmation and warns about conversations', async () => {
-    state.warnings = [];
-    state.warnAnswer = 'Continue';
+  await test('switching profile offers to bring the conversations, and copies them', async () => {
+    const enc = `${W}/free`.replace(/[^A-Za-z0-9]/g, '-');
+    const oldDir = path.join(HOME, '.claude-accounts/gcp/projects', enc);
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'session-1.jsonl'), '{"hello":1}\n');
+    state.warnings = []; state.infos = [];
+    state.warnAnswer = 'Switch and Bring Conversations';
     state.picks = ['personal', 'free'];
     await commands['ccprof.bind']();
     assert(state.warnings.some(w => w.includes('conversations')));
     assert(projects().includes(`${W}/free\tpersonal`));
+    assert(fs.existsSync(path.join(HOME, '.claude-accounts/personal/projects', enc, 'session-1.jsonl')));
+    assert(state.infos.some(m => m.includes('1 new')), state.infos.join(' | '));
     assert.strictEqual(statusItem.backgroundColor.id, 'statusBarItem.warningBackground');
+  });
+
+  await test('"Switch Only" does not copy anything', async () => {
+    state.infos = [];
+    state.warnAnswer = 'Switch Only';
+    state.picks = ['gcp', 'free'];
+    await commands['ccprof.bind']();
+    assert(projects().includes(`${W}/free\tgcp`));
+    assert(!state.infos.some(m => m.includes('brought along')), state.infos.join(' | '));
+    state.warnAnswer = 'Continue';
+    state.config['ccprof.bringConversations'] = 'never';
+    state.picks = ['personal', 'free'];
+    await commands['ccprof.bind']();
+    delete state.config['ccprof.bringConversations'];
   });
 
   await test('cancelling the confirmation changes nothing', async () => {
